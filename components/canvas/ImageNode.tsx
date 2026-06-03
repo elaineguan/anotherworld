@@ -7,6 +7,11 @@ import type { MemoryNodeData } from "@/types";
 type ImageFlowNode = Node<MemoryNodeData, "image">;
 import { persistImage } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
+import { useCanvasStore } from "@/store/canvasStore";
+
+function isImageOnCanvas(imageId: string): boolean {
+  return useCanvasStore.getState().images.some((i) => i.id === imageId);
+}
 
 function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
   const image = data.image!;
@@ -17,6 +22,8 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
   const [caption, setCaption] = useState(image.caption);
 
   const debouncedPersist = useDebouncedCallback((value: string) => {
+    const id = imageRef.current.id;
+    if (!isImageOnCanvas(id)) return;
     void persistImage(
       {
         ...imageRef.current,
@@ -26,6 +33,10 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
       false
     );
   }, 350);
+
+  useEffect(() => {
+    return () => debouncedPersist.cancel();
+  }, [debouncedPersist]);
 
   useEffect(() => {
     setCaption(image.caption);
@@ -38,6 +49,8 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
 
   const flushCaption = useCallback(() => {
     debouncedPersist.cancel();
+    const id = imageRef.current.id;
+    if (!isImageOnCanvas(id)) return;
     void persistImage(
       {
         ...imageRef.current,
@@ -59,6 +72,7 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
 
   const handleResize = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
+      if (!isImageOnCanvas(image.id)) return;
       void persistImage({
         ...image,
         width: params.width,

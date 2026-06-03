@@ -128,6 +128,14 @@ function CanvasInner() {
     });
   }, [merged, setNodes]);
 
+  const handleNodesDelete = useCallback((deleted: Node[]) => {
+    for (const node of deleted) {
+      if (node.id === WELCOME_NODE_ID) continue;
+      if (node.type === "note") void removeNoteMemory(node.id);
+      else if (node.type === "image") void removeImageMemory(node.id);
+    }
+  }, []);
+
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setNodes((nds) => {
@@ -141,12 +149,10 @@ function CanvasInner() {
           if (change.type === "remove") {
             const node = nds.find((n) => n.id === change.id);
             if (!node) continue;
-            const data = node.data as MemoryNodeData;
-            if (data.memoryType === "note" && data.note) {
-              void removeNoteMemory(data.note.id);
-            }
-            if (data.memoryType === "image" && data.image) {
-              void removeImageMemory(data.image.id);
+            if (node.type === "note") {
+              void removeNoteMemory(node.id);
+            } else if (node.type === "image") {
+              void removeImageMemory(node.id);
             }
             continue;
           }
@@ -192,6 +198,7 @@ function CanvasInner() {
         className={`memory-flow ${tool === "draw" || tool === "erase" ? "memory-flow--draw" : ""}`}
         nodes={nodes}
         onNodesChange={onNodesChange}
+        onNodesDelete={handleNodesDelete}
         nodeTypes={nodeTypes}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         minZoom={0.15}

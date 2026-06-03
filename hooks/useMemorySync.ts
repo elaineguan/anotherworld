@@ -39,6 +39,10 @@ import { canSyncImageToFirestore } from "@/lib/image-sync";
 const pendingDeletedNoteIds = new Set<string>();
 const pendingDeletedImageIds = new Set<string>();
 
+/** Block late autosave (debounced typing) from resurrecting deleted items. */
+const tombstoneNoteIds = new Set<string>();
+const tombstoneImageIds = new Set<string>();
+
 function withoutPendingDeletes<T extends { id: string }>(
   items: T[],
   pending: Set<string>
@@ -209,7 +213,10 @@ export function useMemorySync() {
           pendingDeletedNoteIds
         );
         for (const id of pendingDeletedNoteIds) {
-          if (!remote.some((n) => n.id === id)) pendingDeletedNoteIds.delete(id);
+          if (!remote.some((n) => n.id === id)) {
+            pendingDeletedNoteIds.delete(id);
+            tombstoneNoteIds.delete(id);
+          }
         }
         const merged = mergeNotes(filteredRemote, local);
         setNotes(merged);
@@ -228,6 +235,7 @@ export function useMemorySync() {
         for (const id of pendingDeletedImageIds) {
           if (!remote.some((i) => i.id === id)) {
             pendingDeletedImageIds.delete(id);
+            tombstoneImageIds.delete(id);
           }
         }
         const merged = mergeImages(filteredRemote, local);
@@ -394,6 +402,7 @@ export async function persistNote(
   note: NoteMemory,
   trackHistory = true
 ): Promise<void> {
+  if (tombstoneNoteIds.has(note.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertNote(note);
 
@@ -417,6 +426,7 @@ export async function persistImage(
   image: ImageMemory,
   trackHistory = true
 ): Promise<void> {
+  if (tombstoneImageIds.has(image.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertImage(image);
 
@@ -464,7 +474,9 @@ export async function persistDrawing(path: DrawingPath): Promise<void> {
 }
 
 export async function removeNoteMemory(id: string): Promise<void> {
+  if (tombstoneNoteIds.has(id)) return;
   recordHistory();
+  tombstoneNoteIds.add(id);
   pendingDeletedNoteIds.add(id);
   const store = useCanvasStore.getState();
   store.removeNote(id);
@@ -487,7 +499,9 @@ export async function removeNoteMemory(id: string): Promise<void> {
 }
 
 export async function removeImageMemory(id: string): Promise<void> {
+  if (tombstoneImageIds.has(id)) return;
   recordHistory();
+  tombstoneImageIds.add(id);
   pendingDeletedImageIds.add(id);
   const store = useCanvasStore.getState();
   store.removeImage(id);

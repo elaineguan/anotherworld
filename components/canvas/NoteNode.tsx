@@ -7,6 +7,11 @@ import type { MemoryNodeData } from "@/types";
 type NoteFlowNode = Node<MemoryNodeData, "note">;
 import { persistNote } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
+import { useCanvasStore } from "@/store/canvasStore";
+
+function isNoteOnCanvas(noteId: string): boolean {
+  return useCanvasStore.getState().notes.some((n) => n.id === noteId);
+}
 
 function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
   const note = data.note!;
@@ -17,6 +22,8 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
   const [content, setContent] = useState(note.content);
 
   const debouncedPersist = useDebouncedCallback((value: string) => {
+    const id = noteRef.current.id;
+    if (!isNoteOnCanvas(id)) return;
     void persistNote(
       {
         ...noteRef.current,
@@ -26,6 +33,10 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
       false
     );
   }, 350);
+
+  useEffect(() => {
+    return () => debouncedPersist.cancel();
+  }, [debouncedPersist]);
 
   useEffect(() => {
     setContent(note.content);
@@ -38,6 +49,8 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
 
   const flushContent = useCallback(() => {
     debouncedPersist.cancel();
+    const id = noteRef.current.id;
+    if (!isNoteOnCanvas(id)) return;
     void persistNote(
       {
         ...noteRef.current,
@@ -65,6 +78,7 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
 
   const handleResize = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
+      if (!isNoteOnCanvas(note.id)) return;
       void persistNote({
         ...note,
         width: params.width,
