@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import {
@@ -22,10 +22,28 @@ import {
   saveLocalImages,
   saveLocalDrawings,
 } from "@/lib/local-persistence";
+import {
+  mergeNotes,
+  mergeImages,
+  mergeDrawings,
+  itemsMissingFromRemote,
+  itemsNewerThanRemote,
+} from "@/lib/merge-memories";
 import { useCanvasStore } from "@/store/canvasStore";
 import { recordHistory } from "@/store/historyStore";
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
 import type { CanvasSnapshot } from "@/store/historyStore";
+
+function formatSyncError(error: Error): string {
+  const code = (error as { code?: string }).code ?? "";
+  if (code === "permission-denied") {
+    return "Firestore blocked sync — publish firestore.rules in Firebase console";
+  }
+  if (code === "not-found" || code === "failed-precondition") {
+    return "Create a Firestore database in Firebase console (Build → Firestore)";
+  }
+  return error.message || "Cloud sync failed";
+}
 
 async function persistToCloud(
   notes: NoteMemory[],
@@ -41,15 +59,47 @@ async function persistToCloud(
   ]);
 }
 
+async function pushLocalOnlyToCloud(
+  notes: NoteMemory[],
+  images: ImageMemory[],
+  drawings: DrawingPath[],
+  remoteNotes: NoteMemory[],
+  remoteImages: ImageMemory[],
+  remoteDrawings: DrawingPath[]
+): Promise<void> {
+  const noteUploads = [
+    ...itemsMissingFromRemote(notes, remoteNotes),
+    ...itemsNewerThanRemote(notes, remoteNotes),
+  ];
+  const imageUploads = [
+    ...itemsMissingFromRemote(images, remoteImages),
+    ...itemsNewerThanRemote(images, remoteImages),
+  ];
+  const drawingUploads = itemsMissingFromRemote(drawings, remoteDrawings);
+
+  const uniqueNotes = [...new Map(noteUploads.map((n) => [n.id, n])).values()];
+  const uniqueImages = [
+    ...new Map(imageUploads.map((i) => [i.id, i])).values(),
+  ];
+
+  await Promise.all([
+    ...uniqueNotes.map((n) => saveNote(n)),
+    ...uniqueImages.map((i) => saveImage(i)),
+    ...drawingUploads.map((d) => saveDrawing(d)),
+  ]);
+}
+
 export function useMemorySync() {
   const setNotes = useCanvasStore((s) => s.setNotes);
   const setImages = useCanvasStore((s) => s.setImages);
   const setDrawings = useCanvasStore((s) => s.setDrawings);
   const setFirebaseReady = useCanvasStore((s) => s.setFirebaseReady);
+  const setSyncError = useCanvasStore((s) => s.setSyncError);
   const notes = useCanvasStore((s) => s.notes);
   const images = useCanvasStore((s) => s.images);
   const drawings = useCanvasStore((s) => s.drawings);
   const [hydrated, setHydrated] = useState(false);
+  const initialPushDone = useRef(false);
 
   useEffect(() => {
     const localNotes = loadLocalNotes();
@@ -61,23 +111,78 @@ export function useMemorySync() {
     setDrawings(localDrawings);
 
     if (isFirebaseConfigured()) {
+      let remoteNotes: NoteMemory[] = [];
+      let remoteImages: ImageMemory[] = [];
+      let remoteDrawings: DrawingPath[] = [];
+      let snapshotsReceived = 0;
+
+      const maybeInitialPush = () => {
+        snapshotsReceived += 1;
+        if (snapshotsReceived < 3 || initialPushDone.current) return;
+
+        initialPushDone.current = true;
+        const mergedNotes = mergeNotes(
+          remoteNotes,
+          useCanvasStore.getState().notes
+        );
+        const mergedImages = mergeImages(
+          remoteImages,
+          useCanvasStore.getState().images
+        );
+        const mergedDrawings = mergeDrawings(
+          remoteDrawings,
+          useCanvasStore.getState().drawings
+        );
+
+        void pushLocalOnlyToCloud(
+          mergedNotes,
+          mergedImages,
+          mergedDrawings,
+          remoteNotes,
+          remoteImages,
+          remoteDrawings
+        ).catch((err) => {
+          console.error("Initial cloud upload failed:", err);
+          setSyncError(
+            err instanceof Error ? formatSyncError(err) : "Initial upload failed"
+          );
+        });
+      };
+
       const onSyncError = (error: Error) => {
         console.error("Memory sync error:", error);
+        setSyncError(formatSyncError(error));
+        setFirebaseReady(false);
       };
 
       const unsubNotes = subscribeNotes((remote) => {
-        setNotes(remote);
-        saveLocalNotes(remote);
+        remoteNotes = remote;
+        setSyncError(null);
+        const local = useCanvasStore.getState().notes;
+        const merged = mergeNotes(remote, local);
+        setNotes(merged);
+        saveLocalNotes(merged);
+        maybeInitialPush();
       }, onSyncError);
 
       const unsubImages = subscribeImages((remote) => {
-        setImages(remote);
-        saveLocalImages(remote);
+        remoteImages = remote;
+        setSyncError(null);
+        const local = useCanvasStore.getState().images;
+        const merged = mergeImages(remote, local);
+        setImages(merged);
+        saveLocalImages(merged);
+        maybeInitialPush();
       }, onSyncError);
 
       const unsubDrawings = subscribeDrawings((remote) => {
-        setDrawings(remote);
-        saveLocalDrawings(remote);
+        remoteDrawings = remote;
+        setSyncError(null);
+        const local = useCanvasStore.getState().drawings;
+        const merged = mergeDrawings(remote, local);
+        setDrawings(merged);
+        saveLocalDrawings(merged);
+        maybeInitialPush();
       }, onSyncError);
 
       if (unsubNotes || unsubImages || unsubDrawings) {
@@ -93,7 +198,7 @@ export function useMemorySync() {
 
     setFirebaseReady(false);
     setHydrated(true);
-  }, [setNotes, setImages, setDrawings, setFirebaseReady]);
+  }, [setNotes, setImages, setDrawings, setFirebaseReady, setSyncError]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -121,9 +226,14 @@ export function useMemorySync() {
       timer = setTimeout(() => {
         timer = undefined;
         const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
-        void persistToCloud(n, i, d).catch((err) =>
-          console.error("Cloud save failed:", err)
-        );
+        void persistToCloud(n, i, d).catch((err) => {
+          console.error("Cloud save failed:", err);
+          useCanvasStore
+            .getState()
+            .setSyncError(
+              err instanceof Error ? formatSyncError(err) : "Cloud save failed"
+            );
+        });
       }, 800);
     };
 
@@ -140,9 +250,9 @@ export function useMemorySync() {
     const interval = setInterval(() => {
       if (!isFirebaseConfigured()) return;
       const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
-      void persistToCloud(n, i, d).catch((err) =>
-        console.error("Cloud save failed:", err)
-      );
+      void persistToCloud(n, i, d).catch((err) => {
+        console.error("Cloud save failed:", err);
+      });
     }, 10000);
 
     const onBeforeUnload = () => {
@@ -202,7 +312,10 @@ export async function saveAllMemories(): Promise<void> {
   saveLocalImages(images);
   saveLocalDrawings(drawings);
 
-  await persistToCloud(notes, images, drawings);
+  if (isFirebaseConfigured()) {
+    await persistToCloud(notes, images, drawings);
+    useCanvasStore.getState().setSyncError(null);
+  }
 }
 
 export async function persistNote(
@@ -215,8 +328,15 @@ export async function persistNote(
   if (isFirebaseConfigured()) {
     try {
       await saveNote(note);
+      useCanvasStore.getState().setSyncError(null);
     } catch (err) {
       console.error("Failed to save note to cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to save note"
+        );
+      throw err;
     }
   }
 }
@@ -231,8 +351,15 @@ export async function persistImage(
   if (isFirebaseConfigured()) {
     try {
       await saveImage(image);
+      useCanvasStore.getState().setSyncError(null);
     } catch (err) {
       console.error("Failed to save image to cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to save image"
+        );
+      throw err;
     }
   }
 }
@@ -244,8 +371,14 @@ export async function persistDrawing(path: DrawingPath): Promise<void> {
   if (isFirebaseConfigured()) {
     try {
       await saveDrawing(path);
+      useCanvasStore.getState().setSyncError(null);
     } catch (err) {
       console.error("Failed to save drawing to cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to save drawing"
+        );
     }
   }
 }

@@ -18,6 +18,8 @@ interface CanvasState {
   removeImage: (id: string) => void;
   firebaseReady: boolean;
   setFirebaseReady: (ready: boolean) => void;
+  syncError: string | null;
+  setSyncError: (error: string | null) => void;
 }
 
 export const useCanvasStore = create<CanvasState>((set) => ({
@@ -70,4 +72,6 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     })),
   firebaseReady: false,
   setFirebaseReady: (firebaseReady) => set({ firebaseReady }),
+  syncError: null,
+  setSyncError: (syncError) => set({ syncError }),
 }));
