@@ -159,27 +159,40 @@ export function Toolbar() {
     <div className="canvas-toolbar pointer-events-auto z-50 m-5 flex gap-3">
       <div className="flex flex-col gap-0.5 rounded-sm border border-[#D8D4CC] bg-[#F8F6F2]/95 px-1 py-1.5 font-[family-name:var(--font-dm-mono)] text-[18px] backdrop-blur-sm">
         {TOOLS.map(({ id, label }) => (
-          <button
+          <div
             key={id}
-            type="button"
-            onClick={() => handleToolClick(id)}
-            className={`rounded-sm px-3 py-1 text-left transition-colors duration-200 ${toolButtonClass(isToolActive(tool, id))}`}
+            className={
+              id === "draw" && (tool === "draw" || tool === "erase")
+                ? "flex items-center gap-2"
+                : undefined
+            }
           >
-            {label}
-          </button>
+            <button
+              type="button"
+              onClick={() => handleToolClick(id)}
+              className={`rounded-sm px-3 py-1 text-left transition-colors duration-200 ${toolButtonClass(isToolActive(tool, id))}`}
+            >
+              {label}
+            </button>
+            {id === "draw" && (tool === "draw" || tool === "erase") && (
+              <span className="whitespace-nowrap px-1 text-[13px] text-[#949494]">
+                press esc to cancel
+              </span>
+            )}
+          </div>
         ))}
         {(tool === "draw" || tool === "erase") && (
           <div className="mt-0.5 flex flex-col gap-0.5 border-t border-[#D8D4CC] pt-0.5">
             <button
               type="button"
-              onClick={() => setTool("draw")}
+              onClick={() => setTool(tool === "draw" ? "select" : "draw")}
               className={`rounded-sm px-3 py-0.5 text-left transition-colors duration-200 ${toolButtonClass(tool === "draw")}`}
             >
               pen
             </button>
             <button
               type="button"
-              onClick={() => setTool("erase")}
+              onClick={() => setTool(tool === "erase" ? "select" : "erase")}
               className={`rounded-sm px-3 py-0.5 text-left transition-colors duration-200 ${toolButtonClass(tool === "erase")}`}
             >
               erase

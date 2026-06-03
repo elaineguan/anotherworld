@@ -10,7 +10,6 @@ import {
   applyNodeChanges,
   BackgroundVariant,
   Background,
-  Panel,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -224,12 +223,12 @@ function CanvasInner() {
           color="rgba(216, 212, 204, 0.45)"
           lineWidth={1}
         />
-        <Panel position="top-left" className="canvas-panel !m-0 !p-0">
-          <Toolbar />
-          <SyncIndicator />
-        </Panel>
       </ReactFlow>
       <DrawingLayer />
+      <div className="canvas-chrome pointer-events-none absolute left-0 top-0 z-[40]">
+        <Toolbar />
+        <SyncIndicator />
+      </div>
     </div>
   );
 }

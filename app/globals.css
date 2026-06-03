@@ -117,12 +117,7 @@ body > div {
   cursor: grabbing;
 }
 
-.memory-flow .react-flow__panel.canvas-panel {
-  z-index: 50 !important;
-  pointer-events: none;
-}
-
-.memory-flow .react-flow__panel.canvas-panel .canvas-toolbar,
-.memory-flow .react-flow__panel.canvas-panel p {
+.canvas-chrome .canvas-toolbar,
+.canvas-chrome p {
   pointer-events: auto;
 }
