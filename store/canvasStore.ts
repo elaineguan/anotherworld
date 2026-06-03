@@ -18,6 +18,10 @@ interface CanvasState {
   removeImage: (id: string) => void;
   firebaseReady: boolean;
   setFirebaseReady: (ready: boolean) => void;
+  firebaseConnected: boolean;
+  setFirebaseConnected: (connected: boolean) => void;
+  syncInitialized: boolean;
+  setSyncInitialized: (initialized: boolean) => void;
   syncError: string | null;
   setSyncError: (error: string | null) => void;
 }
@@ -72,6 +76,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     })),
   firebaseReady: false,
   setFirebaseReady: (firebaseReady) => set({ firebaseReady }),
+  firebaseConnected: false,
+  setFirebaseConnected: (firebaseConnected) => set({ firebaseConnected }),
+  syncInitialized: false,
+  setSyncInitialized: (syncInitialized) => set({ syncInitialized }),
   syncError: null,
   setSyncError: (syncError) => set({ syncError }),
 }));

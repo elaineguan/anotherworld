@@ -13,7 +13,7 @@ import {
   saveAllMemories,
 } from "@/hooks/useMemorySync";
 import { uploadMemoryImage } from "@/lib/storage";
-import { isFirebaseConfigured } from "@/lib/firebase";
+import { ensureFirebaseInitialized } from "@/lib/firebase";
 import type { CanvasTool } from "@/types";
 
 const TOOLS: { id: CanvasTool; label: string }[] = [
@@ -93,7 +93,8 @@ export function Toolbar() {
     const { x, y } = centerFlow();
     let url: string | null = null;
 
-    if (isFirebaseConfigured()) {
+    const firebaseOk = await ensureFirebaseInitialized();
+    if (firebaseOk) {
       url = await uploadMemoryImage(file);
       if (!url) {
         console.error(

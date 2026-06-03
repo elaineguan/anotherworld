@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { isFirebaseConfigured } from "@/lib/firebase";
+import { ensureFirebaseInitialized } from "@/lib/firebase";
 import {
   subscribeNotes,
   subscribeImages,
@@ -50,7 +50,7 @@ async function persistToCloud(
   images: ImageMemory[],
   drawings: DrawingPath[]
 ): Promise<void> {
-  if (!isFirebaseConfigured()) return;
+  if (!(await ensureFirebaseInitialized())) return;
 
   await Promise.all([
     ...notes.map((n) => saveNote(n)),
@@ -94,14 +94,25 @@ export function useMemorySync() {
   const setImages = useCanvasStore((s) => s.setImages);
   const setDrawings = useCanvasStore((s) => s.setDrawings);
   const setFirebaseReady = useCanvasStore((s) => s.setFirebaseReady);
+  const setFirebaseConnected = useCanvasStore((s) => s.setFirebaseConnected);
+  const setSyncInitialized = useCanvasStore((s) => s.setSyncInitialized);
   const setSyncError = useCanvasStore((s) => s.setSyncError);
   const notes = useCanvasStore((s) => s.notes);
   const images = useCanvasStore((s) => s.images);
   const drawings = useCanvasStore((s) => s.drawings);
   const [hydrated, setHydrated] = useState(false);
   const initialPushDone = useRef(false);
+  const unsubsRef = useRef<{
+    notes?: (() => void) | null;
+    images?: (() => void) | null;
+    drawings?: (() => void) | null;
+  }>({});
 
   useEffect(() => {
+    let cancelled = false;
+    initialPushDone.current = false;
+    unsubsRef.current = {};
+
     const localNotes = loadLocalNotes();
     const localImages = loadLocalImages();
     const localDrawings = loadLocalDrawings();
@@ -110,7 +121,21 @@ export function useMemorySync() {
     setImages(localImages);
     setDrawings(localDrawings);
 
-    if (isFirebaseConfigured()) {
+    void (async () => {
+      const firebaseOk = await ensureFirebaseInitialized();
+      if (cancelled) return;
+
+      setSyncInitialized(true);
+
+      if (!firebaseOk) {
+        setFirebaseConnected(false);
+        setFirebaseReady(false);
+        setHydrated(true);
+        return;
+      }
+
+      setFirebaseConnected(true);
+
       let remoteNotes: NoteMemory[] = [];
       let remoteImages: ImageMemory[] = [];
       let remoteDrawings: DrawingPath[] = [];
@@ -155,7 +180,7 @@ export function useMemorySync() {
         setFirebaseReady(false);
       };
 
-      const unsubNotes = subscribeNotes((remote) => {
+      unsubsRef.current.notes = subscribeNotes((remote) => {
         remoteNotes = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().notes;
@@ -165,7 +190,7 @@ export function useMemorySync() {
         maybeInitialPush();
       }, onSyncError);
 
-      const unsubImages = subscribeImages((remote) => {
+      unsubsRef.current.images = subscribeImages((remote) => {
         remoteImages = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().images;
@@ -175,7 +200,7 @@ export function useMemorySync() {
         maybeInitialPush();
       }, onSyncError);
 
-      const unsubDrawings = subscribeDrawings((remote) => {
+      unsubsRef.current.drawings = subscribeDrawings((remote) => {
         remoteDrawings = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().drawings;
@@ -185,20 +210,31 @@ export function useMemorySync() {
         maybeInitialPush();
       }, onSyncError);
 
-      if (unsubNotes || unsubImages || unsubDrawings) {
-        setFirebaseReady(true);
-        setHydrated(true);
-        return () => {
-          unsubNotes?.();
-          unsubImages?.();
-          unsubDrawings?.();
-        };
-      }
-    }
+      setFirebaseReady(true);
+      setHydrated(true);
 
-    setFirebaseReady(false);
-    setHydrated(true);
-  }, [setNotes, setImages, setDrawings, setFirebaseReady, setSyncError]);
+      if (cancelled) {
+        unsubsRef.current.notes?.();
+        unsubsRef.current.images?.();
+        unsubsRef.current.drawings?.();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubsRef.current.notes?.();
+      unsubsRef.current.images?.();
+      unsubsRef.current.drawings?.();
+    };
+  }, [
+    setNotes,
+    setImages,
+    setDrawings,
+    setFirebaseReady,
+    setFirebaseConnected,
+    setSyncInitialized,
+    setSyncError,
+  ]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -221,7 +257,7 @@ export function useMemorySync() {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const scheduleCloudSave = () => {
-      if (!isFirebaseConfigured()) return;
+      if (!useCanvasStore.getState().firebaseConnected) return;
       if (timer !== undefined) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = undefined;
@@ -248,7 +284,7 @@ export function useMemorySync() {
     });
 
     const interval = setInterval(() => {
-      if (!isFirebaseConfigured()) return;
+      if (!useCanvasStore.getState().firebaseConnected) return;
       const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
       void persistToCloud(n, i, d).catch((err) => {
         console.error("Cloud save failed:", err);
@@ -287,7 +323,7 @@ export async function applyCanvasSnapshot(snapshot: CanvasSnapshot): Promise<voi
   saveLocalImages(snapshot.images);
   saveLocalDrawings(snapshot.drawings);
 
-  if (!isFirebaseConfigured()) return;
+  if (!(await ensureFirebaseInitialized())) return;
 
   await Promise.all([
     ...prevNotes
@@ -312,7 +348,7 @@ export async function saveAllMemories(): Promise<void> {
   saveLocalImages(images);
   saveLocalDrawings(drawings);
 
-  if (isFirebaseConfigured()) {
+  if (await ensureFirebaseInitialized()) {
     await persistToCloud(notes, images, drawings);
     useCanvasStore.getState().setSyncError(null);
   }
@@ -325,7 +361,7 @@ export async function persistNote(
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertNote(note);
 
-  if (isFirebaseConfigured()) {
+  if (await ensureFirebaseInitialized()) {
     try {
       await saveNote(note);
       useCanvasStore.getState().setSyncError(null);
@@ -348,7 +384,7 @@ export async function persistImage(
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertImage(image);
 
-  if (isFirebaseConfigured()) {
+  if (await ensureFirebaseInitialized()) {
     try {
       await saveImage(image);
       useCanvasStore.getState().setSyncError(null);
@@ -368,7 +404,7 @@ export async function persistDrawing(path: DrawingPath): Promise<void> {
   recordHistory();
   useCanvasStore.getState().upsertDrawing(path);
 
-  if (isFirebaseConfigured()) {
+  if (await ensureFirebaseInitialized()) {
     try {
       await saveDrawing(path);
       useCanvasStore.getState().setSyncError(null);
@@ -387,7 +423,7 @@ export async function removeDrawingMemory(id: string): Promise<void> {
   recordHistory();
   useCanvasStore.getState().removeDrawing(id);
 
-  if (isFirebaseConfigured()) {
+  if (await ensureFirebaseInitialized()) {
     try {
       await deleteDrawing(id);
     } catch (err) {

@@ -1,7 +1,8 @@
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { getFirebaseStorage } from "./firebase";
+import { ensureFirebaseInitialized, getFirebaseStorage } from "./firebase";
 
 export async function uploadMemoryImage(file: File): Promise<string | null> {
+  if (!(await ensureFirebaseInitialized())) return null;
   const storage = getFirebaseStorage();
   if (!storage) return null;
 

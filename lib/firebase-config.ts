@@ -1,5 +1,23 @@
-/** Read Firebase env at call time so Next.js client bundles pick up .env.local after restart. */
-export function readFirebaseEnv() {
+export type FirebaseClientConfig = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
+};
+
+export function isValidFirebaseConfig(
+  config: FirebaseClientConfig | null | undefined
+): boolean {
+  if (!config) return false;
+  return Boolean(
+    config.apiKey && config.projectId && config.storageBucket
+  );
+}
+
+/** Build-time env (works locally after dev server restart). */
+export function readFirebaseEnv(): FirebaseClientConfig {
   return {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "",
     authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "",
@@ -11,20 +29,5 @@ export function readFirebaseEnv() {
 }
 
 export function hasFirebaseEnv(): boolean {
-  const { apiKey, projectId, storageBucket } = readFirebaseEnv();
-  return Boolean(apiKey && projectId && storageBucket);
-}
-
-export type FirebaseEnvStatus = {
-  configured: boolean;
-  missing: string[];
-};
-
-export function getFirebaseEnvStatus(): FirebaseEnvStatus {
-  const env = readFirebaseEnv();
-  const missing: string[] = [];
-  if (!env.apiKey) missing.push("API_KEY");
-  if (!env.projectId) missing.push("PROJECT_ID");
-  if (!env.storageBucket) missing.push("STORAGE_BUCKET");
-  return { configured: missing.length === 0, missing };
+  return isValidFirebaseConfig(readFirebaseEnv());
 }
