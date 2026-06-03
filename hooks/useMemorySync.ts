@@ -34,10 +34,15 @@ import { recordHistory } from "@/store/historyStore";
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
 import type { CanvasSnapshot } from "@/store/historyStore";
 import { canSyncImageToFirestore } from "@/lib/image-sync";
+import {
+  applyEditingImageOverrides,
+  applyEditingNoteOverrides,
+} from "@/lib/editing-registry";
 
 /** Keep deleted items from reappearing while Firestore catches up. */
 const pendingDeletedNoteIds = new Set<string>();
 const pendingDeletedImageIds = new Set<string>();
+const pendingDeletedDrawingIds = new Set<string>();
 
 /** Block late autosave (debounced typing) from resurrecting deleted items. */
 const tombstoneNoteIds = new Set<string>();
@@ -228,7 +233,10 @@ export function useMemorySync() {
             tombstoneNoteIds.delete(id);
           }
         }
-        const merged = mergeNotes(filteredRemote, local);
+        const merged = applyEditingNoteOverrides(
+          mergeNotes(filteredRemote, local),
+          local
+        );
         setNotes(merged);
         saveLocalNotes(merged);
         maybeInitialPush();
@@ -249,7 +257,10 @@ export function useMemorySync() {
             tombstoneImageIds.delete(id);
           }
         }
-        const merged = mergeImages(filteredRemote, local);
+        const merged = applyEditingImageOverrides(
+          mergeImages(filteredRemote, local),
+          local
+        );
         setImages(merged);
         saveLocalImages(merged);
         maybeInitialPush();
@@ -260,7 +271,16 @@ export function useMemorySync() {
         remoteDrawings = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().drawings;
-        const merged = mergeDrawings(remote, local);
+        const filteredRemote = withoutPendingDeletes(
+          remote,
+          pendingDeletedDrawingIds
+        );
+        for (const id of pendingDeletedDrawingIds) {
+          if (!remote.some((d) => d.id === id)) {
+            pendingDeletedDrawingIds.delete(id);
+          }
+        }
+        const merged = mergeDrawings(filteredRemote, local);
         setDrawings(merged);
         saveLocalDrawings(merged);
         maybeInitialPush();
@@ -544,14 +564,24 @@ export async function removeImageMemory(id: string): Promise<void> {
 }
 
 export async function removeDrawingMemory(id: string): Promise<void> {
+  if (pendingDeletedDrawingIds.has(id)) return;
   recordHistory();
-  useCanvasStore.getState().removeDrawing(id);
+  pendingDeletedDrawingIds.add(id);
+  const store = useCanvasStore.getState();
+  store.removeDrawing(id);
+  saveLocalDrawings(store.drawings);
 
   if (await ensureFirebaseInitialized()) {
     try {
       await deleteDrawing(id);
+      useCanvasStore.getState().setSyncError(null);
     } catch (err) {
       console.error("Failed to delete drawing from cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to delete drawing"
+        );
     }
   }
 }

@@ -9,7 +9,7 @@ import type { DrawingPath, Point } from "@/types";
 
 const STROKE_COLOR = "#5A5A5A";
 const STROKE_WIDTH = 2;
-const ERASE_RADIUS = 14;
+const ERASE_RADIUS_PX = 16;
 
 function pathToSvg(points: Point[] | undefined): string {
   if (!points || points.length < 2) return "";
@@ -21,20 +21,44 @@ function dist(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function pointNearPath(point: Point, path: DrawingPath, radius: number): boolean {
+function distToSegment(point: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return dist(point, a);
+
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq)
+  );
+  return dist(point, { x: a.x + t * dx, y: a.y + t * dy });
+}
+
+function pointNearPath(
+  point: Point,
+  path: DrawingPath,
+  radius: number
+): boolean {
   if (!Array.isArray(path.points) || path.points.length === 0) return false;
+
+  if (path.points.some((p) => dist(point, p) < radius)) return true;
+
   for (let i = 0; i < path.points.length - 1; i++) {
-    const a = path.points[i];
-    const b = path.points[i + 1];
-    const d = dist(point, a) + dist(point, b);
-    if (d < radius * 2 + dist(a, b)) return true;
-    for (let t = 0; t <= 1; t += 0.2) {
-      const px = a.x + (b.x - a.x) * t;
-      const py = a.y + (b.y - a.y) * t;
-      if (dist(point, { x: px, y: py }) < radius) return true;
+    if (distToSegment(point, path.points[i], path.points[i + 1]) < radius) {
+      return true;
     }
   }
-  return path.points.some((p) => dist(point, p) < radius);
+
+  return false;
+}
+
+function findDrawingAtPoint(
+  point: Point,
+  radius: number
+): DrawingPath | undefined {
+  return useCanvasStore
+    .getState()
+    .drawings.find((d) => pointNearPath(point, d, radius));
 }
 
 function DrawingDisplay() {
@@ -74,19 +98,22 @@ function DrawingDisplay() {
 
 function DrawingCapture() {
   const tool = useCanvasStore((s) => s.tool);
-  const drawings = useCanvasStore((s) => s.drawings);
   const { screenToFlowPosition } = useReactFlow();
   const viewport = useViewport();
   const drawingRef = useRef(false);
+  const erasingRef = useRef(false);
   const pointsRef = useRef<Point[]>([]);
   const isDrawingRef = useRef(false);
   const isErasingRef = useRef(false);
+  const erasedDuringStrokeRef = useRef(new Set<string>());
 
   const isDrawing = tool === "draw";
   const isErasing = tool === "erase";
 
   isDrawingRef.current = isDrawing;
   isErasingRef.current = isErasing;
+
+  const eraseRadius = ERASE_RADIUS_PX / Math.max(viewport.zoom, 0.15);
 
   const getFlowPoint = useCallback(
     (clientX: number, clientY: number): Point =>
@@ -106,6 +133,16 @@ function DrawingCapture() {
     }
   }, []);
 
+  const eraseAtPoint = useCallback(
+    (point: Point) => {
+      const hit = findDrawingAtPoint(point, eraseRadius);
+      if (!hit || erasedDuringStrokeRef.current.has(hit.id)) return;
+      erasedDuringStrokeRef.current.add(hit.id);
+      void removeDrawingMemory(hit.id);
+    },
+    [eraseRadius]
+  );
+
   const finishStroke = useCallback(async () => {
     const points = pointsRef.current;
     pointsRef.current = [];
@@ -124,6 +161,11 @@ function DrawingCapture() {
   }, [updatePreview]);
 
   const endStroke = useCallback(() => {
+    if (erasingRef.current) {
+      erasingRef.current = false;
+      erasedDuringStrokeRef.current.clear();
+      return;
+    }
     if (!drawingRef.current) return;
     drawingRef.current = false;
     void finishStroke();
@@ -136,11 +178,7 @@ function DrawingCapture() {
 
     const onMove = (e: PointerEvent) => {
       if (isErasingRef.current && e.buttons === 1) {
-        const point = getFlowPoint(e.clientX, e.clientY);
-        const hit = useCanvasStore
-          .getState()
-          .drawings.find((d) => pointNearPath(point, d, ERASE_RADIUS));
-        if (hit) void removeDrawingMemory(hit.id);
+        eraseAtPoint(getFlowPoint(e.clientX, e.clientY));
         return;
       }
 
@@ -171,7 +209,7 @@ function DrawingCapture() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [getFlowPoint, viewport.zoom, updatePreview, endStroke]);
+  }, [getFlowPoint, viewport.zoom, updatePreview, endStroke, eraseAtPoint]);
 
   useEffect(() => {
     return () => clearWindowListeners.current?.();
@@ -187,8 +225,9 @@ function DrawingCapture() {
       const point = getFlowPoint(e.clientX, e.clientY);
 
       if (isErasingRef.current) {
-        const hit = drawings.find((d) => pointNearPath(point, d, ERASE_RADIUS));
-        if (hit) void removeDrawingMemory(hit.id);
+        erasingRef.current = true;
+        erasedDuringStrokeRef.current.clear();
+        eraseAtPoint(point);
         attachWindowListeners();
         return;
       }
@@ -200,7 +239,7 @@ function DrawingCapture() {
       updatePreview();
       attachWindowListeners();
     },
-    [getFlowPoint, drawings, updatePreview, attachWindowListeners]
+    [getFlowPoint, updatePreview, attachWindowListeners, eraseAtPoint]
   );
 
   return (

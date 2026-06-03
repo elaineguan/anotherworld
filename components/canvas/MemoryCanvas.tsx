@@ -30,6 +30,7 @@ import {
 } from "@/hooks/useMemorySync";
 import type { MemoryNodeData } from "@/types";
 import { isEditingCanvasField } from "@/lib/is-editing-canvas-field";
+import { memoryLayoutKey } from "@/lib/memory-layout-key";
 
 const WELCOME_NODE_ID = "welcome-message";
 const WELCOME_WIDTH = 448;
@@ -73,7 +74,7 @@ function notesToNodes(
     id: note.id,
     type: "note",
     position: { x: note.x, y: note.y },
-    data: { memoryType: "note", note },
+    data: { memoryType: "note", noteId: note.id },
     style: { width: note.width, height: note.height },
     draggable: true,
     selectable: true,
@@ -83,7 +84,7 @@ function notesToNodes(
     id: image.id,
     type: "image",
     position: { x: image.x, y: image.y },
-    data: { memoryType: "image", image },
+    data: { memoryType: "image", imageId: image.id },
     style: { width: image.width, height: image.height },
     draggable: true,
     selectable: true,
@@ -105,9 +106,14 @@ function CanvasInner() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const noteLayoutKey = memoryLayoutKey(notes);
+  const imageLayoutKey = memoryLayoutKey(images);
+
   const merged = useMemo(
     () => notesToNodes(notes, images, welcomePosition),
-    [notes, images, welcomePosition]
+    // Rebuild flow nodes only when layout changes — not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notes/images read from latest render when keys change
+    [noteLayoutKey, imageLayoutKey, welcomePosition]
   );
 
   const [nodes, setNodes] = useNodesState(merged);
@@ -123,14 +129,15 @@ function CanvasInner() {
         const nextData = next.data as MemoryNodeData;
         const curData = cur.data as MemoryNodeData;
         const unchanged =
+          next.id === cur.id &&
           next.type === cur.type &&
           next.position.x === cur.position.x &&
           next.position.y === cur.position.y &&
-          ((next.type === "note" &&
-            nextData.note?.updatedAt === curData.note?.updatedAt) ||
-            (next.type === "image" &&
-              nextData.image?.updatedAt === curData.image?.updatedAt) ||
-            next.id === WELCOME_NODE_ID);
+          (next.style?.width ?? 0) === (cur.style?.width ?? 0) &&
+          (next.style?.height ?? 0) === (cur.style?.height ?? 0) &&
+          nextData.memoryType === curData.memoryType &&
+          nextData.noteId === curData.noteId &&
+          nextData.imageId === curData.imageId;
 
         if (unchanged) {
           return {
@@ -191,21 +198,34 @@ function CanvasInner() {
             const node = updated.find((n) => n.id === change.id);
             if (!node) continue;
             const data = node.data as MemoryNodeData;
-            if (data.memoryType === "note" && data.note) {
-              void persistNote({
-                ...data.note,
-                x: change.position.x,
-                y: change.position.y,
-                updatedAt: Date.now(),
-              });
+            const noteId = data.noteId ?? data.note?.id;
+            const imageId = data.imageId ?? data.image?.id;
+
+            if (data.memoryType === "note" && noteId) {
+              const note = useCanvasStore
+                .getState()
+                .notes.find((n) => n.id === noteId);
+              if (note) {
+                void persistNote({
+                  ...note,
+                  x: change.position.x,
+                  y: change.position.y,
+                  updatedAt: Date.now(),
+                });
+              }
             }
-            if (data.memoryType === "image" && data.image) {
-              void persistImage({
-                ...data.image,
-                x: change.position.x,
-                y: change.position.y,
-                updatedAt: Date.now(),
-              });
+            if (data.memoryType === "image" && imageId) {
+              const image = useCanvasStore
+                .getState()
+                .images.find((i) => i.id === imageId);
+              if (image) {
+                void persistImage({
+                  ...image,
+                  x: change.position.x,
+                  y: change.position.y,
+                  updatedAt: Date.now(),
+                });
+              }
             }
           }
         }

@@ -42,6 +42,10 @@ export type MemoryNodeType = "note" | "image";
 
 export interface MemoryNodeData extends Record<string, unknown> {
   memoryType: MemoryNodeType;
+  noteId?: string;
+  imageId?: string;
+  /** @deprecated Flow nodes use noteId; kept for migration */
   note?: NoteMemory;
+  /** @deprecated Flow nodes use imageId; kept for migration */
   image?: ImageMemory;
 }

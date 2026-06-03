@@ -3,68 +3,102 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import type { MemoryNodeData, ImageMemory } from "@/types";
-
-type ImageFlowNode = Node<MemoryNodeData, "image">;
 import { persistImage, saveImageToCloud } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
 import { useCanvasStore } from "@/store/canvasStore";
+import { isImageEditing, setImageEditing } from "@/lib/editing-registry";
+
+type ImageFlowNode = Node<MemoryNodeData, "image">;
 
 function isImageOnCanvas(imageId: string): boolean {
   return useCanvasStore.getState().images.some((i) => i.id === imageId);
 }
 
 function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
-  const image = data.image!;
+  const imageId = data.imageId ?? data.image?.id;
   const inputRef = useRef<HTMLInputElement>(null);
-  const imageRef = useRef(image);
-  imageRef.current = image;
 
-  const [caption, setCaption] = useState(image.caption);
+  const storageUrl = useCanvasStore(
+    (s) => s.images.find((i) => i.id === imageId)?.storageUrl ?? ""
+  );
+  const imageWidth = useCanvasStore(
+    (s) => s.images.find((i) => i.id === imageId)?.width ?? 0
+  );
+  const imageHeight = useCanvasStore(
+    (s) => s.images.find((i) => i.id === imageId)?.height ?? 0
+  );
+  const hasImage = useCanvasStore((s) =>
+    s.images.some((i) => i.id === imageId)
+  );
 
-  const debouncedCloudSave = useDebouncedCallback((image: ImageMemory) => {
-    if (!isImageOnCanvas(image.id)) return;
-    void saveImageToCloud(image);
+  const syncedCaption = useCanvasStore((s) => {
+    const img = s.images.find((i) => i.id === imageId);
+    return img?.caption ?? "";
+  });
+
+  const [caption, setCaption] = useState(() => syncedCaption);
+
+  const debouncedPersist = useDebouncedCallback((value: string) => {
+    if (!imageId || !isImageOnCanvas(imageId)) return;
+    const base = useCanvasStore.getState().images.find((i) => i.id === imageId);
+    if (!base) return;
+
+    const draft: ImageMemory = {
+      ...base,
+      caption: value,
+      updatedAt: Date.now(),
+    };
+    useCanvasStore.getState().upsertImage(draft);
+    void saveImageToCloud(draft);
   }, 350);
 
   useEffect(() => {
-    return () => debouncedCloudSave.cancel();
-  }, [debouncedCloudSave]);
+    return () => {
+      debouncedPersist.cancel();
+      if (imageId) setImageEditing(imageId, false);
+    };
+  }, [debouncedPersist, imageId]);
 
   useEffect(() => {
-    setCaption(image.caption);
-  }, [image.id]);
-
-  useEffect(() => {
+    if (!imageId) return;
+    if (isImageEditing(imageId)) return;
     if (document.activeElement === inputRef.current) return;
-    setCaption(image.caption);
-  }, [image.caption]);
+    setCaption(syncedCaption);
+  }, [imageId, syncedCaption]);
 
   const flushCaption = useCallback(() => {
-    debouncedCloudSave.cancel();
-    const id = imageRef.current.id;
-    if (!isImageOnCanvas(id)) return;
-    void saveImageToCloud({
-      ...imageRef.current,
+    if (!imageId) return;
+    debouncedPersist.cancel();
+    if (!isImageOnCanvas(imageId)) return;
+
+    const base = useCanvasStore.getState().images.find((i) => i.id === imageId);
+    if (!base) return;
+
+    const draft: ImageMemory = {
+      ...base,
       caption,
       updatedAt: Date.now(),
-    });
-  }, [caption, debouncedCloudSave]);
+    };
+    useCanvasStore.getState().upsertImage(draft);
+    void saveImageToCloud(draft);
+  }, [caption, debouncedPersist, imageId]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setCaption(value);
-      const draft: ImageMemory = {
-        ...imageRef.current,
-        caption: value,
-        updatedAt: Date.now(),
-      };
-      imageRef.current = draft;
-      useCanvasStore.getState().upsertImage(draft);
-      debouncedCloudSave(draft);
+      setCaption(e.target.value);
+      debouncedPersist(e.target.value);
     },
-    [debouncedCloudSave]
+    [debouncedPersist]
   );
+
+  const handleFocus = useCallback(() => {
+    if (imageId) setImageEditing(imageId, true);
+  }, [imageId]);
+
+  const handleBlur = useCallback(() => {
+    if (imageId) setImageEditing(imageId, false);
+    flushCaption();
+  }, [imageId, flushCaption]);
 
   const stopDeleteShortcut = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -77,16 +111,22 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
 
   const handleResize = useCallback(
     (_: unknown, params: { width: number; height: number }) => {
-      if (!isImageOnCanvas(image.id)) return;
+      if (!imageId || !isImageOnCanvas(imageId)) return;
+      const base = useCanvasStore.getState().images.find((i) => i.id === imageId);
+      if (!base) return;
       void persistImage({
-        ...image,
+        ...base,
         width: params.width,
         height: params.height,
         updatedAt: Date.now(),
       });
     },
-    [image]
+    [imageId]
   );
+
+  if (!imageId || !hasImage || imageWidth <= 0 || imageHeight <= 0) {
+    return null;
+  }
 
   return (
     <>
@@ -100,13 +140,13 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
       />
       <div
         className="flex h-full w-full flex-col overflow-hidden rounded-sm border border-[#D8D4CC] bg-[#F8F6F2]"
-        style={{ width: image.width, height: image.height }}
+        style={{ width: imageWidth, height: imageHeight }}
       >
         <div className="relative flex min-h-0 flex-1 items-center justify-center">
-          {image.storageUrl ? (
+          {storageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={image.storageUrl}
+              src={storageUrl}
               alt={caption || "Memory fragment"}
               draggable={false}
               className="max-h-full max-w-full object-contain"
@@ -118,9 +158,10 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
           type="text"
           value={caption}
           onChange={handleChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onKeyDown={stopDeleteShortcut}
           onKeyDownCapture={stopDeleteShortcut}
-          onBlur={flushCaption}
           placeholder="Optional trace..."
           className="nodrag nopan h-8 shrink-0 border-t border-[#D8D4CC] bg-transparent px-2 font-[family-name:var(--font-dm-mono)] text-xs text-[#5A5A5A] outline-none placeholder:text-[#949494]"
         />

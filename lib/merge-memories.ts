@@ -58,9 +58,7 @@ export function mergeDrawings(
   }
 
   for (const path of local) {
-    if (!map.has(path.id)) {
-      map.set(path.id, path);
-    }
+    map.set(path.id, path);
   }
 
   return Array.from(map.values());
