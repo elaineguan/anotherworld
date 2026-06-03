@@ -89,6 +89,14 @@ body > div {
   cursor: crosshair;
 }
 
+.memory-flow.memory-flow--draw .react-flow__node {
+  pointer-events: none;
+}
+
+.memory-flow.memory-flow--draw .react-flow__node.selectable {
+  cursor: crosshair;
+}
+
 .font-garamond-narrow {
   font-family:
     "Garamond Premier Pro",

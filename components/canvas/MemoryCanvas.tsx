@@ -190,12 +190,13 @@ function CanvasInner() {
   );
 
   const isWandering = tool === "select";
+  const isDrawMode = tool === "draw" || tool === "erase";
 
   return (
     <div className="relative h-full min-h-0 w-full">
       <SaveToast />
       <ReactFlow
-        className={`memory-flow ${tool === "draw" || tool === "erase" ? "memory-flow--draw" : ""}`}
+        className={`memory-flow ${isDrawMode ? "memory-flow--draw" : ""}`}
         nodes={nodes}
         onNodesChange={onNodesChange}
         onNodesDelete={handleNodesDelete}
@@ -204,13 +205,14 @@ function CanvasInner() {
         minZoom={0.15}
         maxZoom={3}
         panOnDrag={isWandering}
-        panOnScroll={false}
-        zoomOnScroll
-        zoomOnPinch
+        panOnScroll={!isDrawMode}
+        zoomOnScroll={!isDrawMode}
+        zoomOnPinch={!isDrawMode}
         selectionOnDrag={false}
         nodesDraggable={isWandering}
         nodesConnectable={false}
         elementsSelectable={isWandering}
+        nodesFocusable={isWandering}
         deleteKeyCode={isWandering ? ["Backspace", "Delete"] : null}
         proOptions={{ hideAttribution: true }}
         style={{ background: "transparent" }}
@@ -222,12 +224,12 @@ function CanvasInner() {
           color="rgba(216, 212, 204, 0.45)"
           lineWidth={1}
         />
-        <DrawingLayer />
         <Panel position="top-left" className="canvas-panel !m-0 !p-0">
           <Toolbar />
           <SyncIndicator />
         </Panel>
       </ReactFlow>
+      <DrawingLayer />
     </div>
   );
 }
