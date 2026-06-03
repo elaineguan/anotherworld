@@ -8,7 +8,7 @@ import { useUiStore } from "@/store/uiStore";
 const PHRASES = [
   "Loading...",
   "Welcome, Traveler.",
-  "You seem like you're lost...",
+  "You seem lost...",
   "...but don't worry.",
   "You're exactly where you're meant to be.",
 ];
