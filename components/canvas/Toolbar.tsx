@@ -97,9 +97,11 @@ export function Toolbar() {
     if (firebaseOk) {
       url = await uploadMemoryImage(file);
       if (!url) {
-        console.error(
-          "Image upload failed. Check Firebase Storage rules and bucket config."
-        );
+        useCanvasStore
+          .getState()
+          .setSyncError(
+            "memento upload failed — enable Firebase Storage (Blaze) and publish storage.rules"
+          );
         return;
       }
     } else {

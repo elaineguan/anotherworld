@@ -33,16 +33,36 @@ import { useCanvasStore } from "@/store/canvasStore";
 import { recordHistory } from "@/store/historyStore";
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
 import type { CanvasSnapshot } from "@/store/historyStore";
+import { canSyncImageToFirestore } from "@/lib/image-sync";
+
+/** Keep deleted items from reappearing while Firestore catches up. */
+const pendingDeletedNoteIds = new Set<string>();
+const pendingDeletedImageIds = new Set<string>();
+
+function withoutPendingDeletes<T extends { id: string }>(
+  items: T[],
+  pending: Set<string>
+): T[] {
+  return items.filter((item) => !pending.has(item.id));
+}
 
 function formatSyncError(error: Error): string {
   const code = (error as { code?: string }).code ?? "";
+  const msg = error.message || "";
+  if (msg.includes("storageUrl") && msg.includes("longer than")) {
+    return "a memento image is too large — delete old mementos and re-add photos";
+  }
   if (code === "permission-denied") {
     return "Firestore blocked sync — publish firestore.rules in Firebase console";
   }
   if (code === "not-found" || code === "failed-precondition") {
     return "Create a Firestore database in Firebase console (Build → Firestore)";
   }
-  return error.message || "Cloud sync failed";
+  return msg || "Cloud sync failed";
+}
+
+function cloudSafeImages(images: ImageMemory[]): ImageMemory[] {
+  return images.filter(canSyncImageToFirestore);
 }
 
 async function persistToCloud(
@@ -54,7 +74,7 @@ async function persistToCloud(
 
   await Promise.all([
     ...notes.map((n) => saveNote(n)),
-    ...images.map((i) => saveImage(i)),
+    ...cloudSafeImages(images).map((i) => saveImage(i)),
     ...drawings.map((d) => saveDrawing(d)),
   ]);
 }
@@ -80,7 +100,7 @@ async function pushLocalOnlyToCloud(
   const uniqueNotes = [...new Map(noteUploads.map((n) => [n.id, n])).values()];
   const uniqueImages = [
     ...new Map(imageUploads.map((i) => [i.id, i])).values(),
-  ];
+  ].filter(canSyncImageToFirestore);
 
   await Promise.all([
     ...uniqueNotes.map((n) => saveNote(n)),
@@ -184,7 +204,14 @@ export function useMemorySync() {
         remoteNotes = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().notes;
-        const merged = mergeNotes(remote, local);
+        const filteredRemote = withoutPendingDeletes(
+          remote,
+          pendingDeletedNoteIds
+        );
+        for (const id of pendingDeletedNoteIds) {
+          if (!remote.some((n) => n.id === id)) pendingDeletedNoteIds.delete(id);
+        }
+        const merged = mergeNotes(filteredRemote, local);
         setNotes(merged);
         saveLocalNotes(merged);
         maybeInitialPush();
@@ -194,7 +221,16 @@ export function useMemorySync() {
         remoteImages = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().images;
-        const merged = mergeImages(remote, local);
+        const filteredRemote = withoutPendingDeletes(
+          remote,
+          pendingDeletedImageIds
+        );
+        for (const id of pendingDeletedImageIds) {
+          if (!remote.some((i) => i.id === id)) {
+            pendingDeletedImageIds.delete(id);
+          }
+        }
+        const merged = mergeImages(filteredRemote, local);
         setImages(merged);
         saveLocalImages(merged);
         maybeInitialPush();
@@ -385,6 +421,14 @@ export async function persistImage(
   useCanvasStore.getState().upsertImage(image);
 
   if (await ensureFirebaseInitialized()) {
+    if (!canSyncImageToFirestore(image)) {
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          "memento too large for cloud — use Add a Memento again (uploads to Storage)"
+        );
+      return;
+    }
     try {
       await saveImage(image);
       useCanvasStore.getState().setSyncError(null);
@@ -415,6 +459,52 @@ export async function persistDrawing(path: DrawingPath): Promise<void> {
         .setSyncError(
           err instanceof Error ? formatSyncError(err) : "Failed to save drawing"
         );
+    }
+  }
+}
+
+export async function removeNoteMemory(id: string): Promise<void> {
+  recordHistory();
+  pendingDeletedNoteIds.add(id);
+  const store = useCanvasStore.getState();
+  store.removeNote(id);
+  saveLocalNotes(store.notes);
+
+  if (await ensureFirebaseInitialized()) {
+    try {
+      await deleteNote(id);
+      useCanvasStore.getState().setSyncError(null);
+    } catch (err) {
+      console.error("Failed to delete note from cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to delete note"
+        );
+      throw err;
+    }
+  }
+}
+
+export async function removeImageMemory(id: string): Promise<void> {
+  recordHistory();
+  pendingDeletedImageIds.add(id);
+  const store = useCanvasStore.getState();
+  store.removeImage(id);
+  saveLocalImages(store.images);
+
+  if (await ensureFirebaseInitialized()) {
+    try {
+      await deleteImage(id);
+      useCanvasStore.getState().setSyncError(null);
+    } catch (err) {
+      console.error("Failed to delete image from cloud:", err);
+      useCanvasStore
+        .getState()
+        .setSyncError(
+          err instanceof Error ? formatSyncError(err) : "Failed to delete memento"
+        );
+      throw err;
     }
   }
 }

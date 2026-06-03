@@ -22,7 +22,13 @@ import { Toolbar } from "./Toolbar";
 import { SaveToast } from "./SaveToast";
 import { SyncIndicator } from "./SyncIndicator";
 import { useCanvasStore } from "@/store/canvasStore";
-import { useMemorySync, persistNote, persistImage } from "@/hooks/useMemorySync";
+import {
+  useMemorySync,
+  persistNote,
+  persistImage,
+  removeNoteMemory,
+  removeImageMemory,
+} from "@/hooks/useMemorySync";
 import type { MemoryNodeData } from "@/types";
 
 const WELCOME_NODE_ID = "welcome-message";
@@ -132,6 +138,19 @@ function CanvasInner() {
 
         const updated = applyNodeChanges(filtered, nds) as Node<MemoryNodeData>[];
         for (const change of filtered) {
+          if (change.type === "remove") {
+            const node = nds.find((n) => n.id === change.id);
+            if (!node) continue;
+            const data = node.data as MemoryNodeData;
+            if (data.memoryType === "note" && data.note) {
+              void removeNoteMemory(data.note.id);
+            }
+            if (data.memoryType === "image" && data.image) {
+              void removeImageMemory(data.image.id);
+            }
+            continue;
+          }
+
           if (
             change.type === "position" &&
             change.position &&
@@ -185,6 +204,7 @@ function CanvasInner() {
         nodesDraggable={isWandering}
         nodesConnectable={false}
         elementsSelectable={isWandering}
+        deleteKeyCode={isWandering ? ["Backspace", "Delete"] : null}
         proOptions={{ hideAttribution: true }}
         style={{ background: "transparent" }}
       >
