@@ -34,6 +34,24 @@ Enable Firestore and Storage in the Firebase console. Use open security rules on
 /types        — shared TypeScript types
 ```
 
+## Deploy on Vercel
+
+1. Import the GitHub repo `elaineguan/anotherworld` in [Vercel](https://vercel.com/new).
+2. **Framework Preset:** Next.js  
+3. **Root Directory:** leave blank (repo root)  
+4. **Output Directory:** leave blank — do not set `out`, `dist`, or `.next`  
+5. **Node.js:** 20 (matches `.nvmrc`)
+
+After deploy, open the URL from the green **Visit** button on the latest deployment — not an old preview link.
+
+**Note:** `anotherworld.vercel.app` may already belong to a different Vercel project (unrelated site). Your app will get its own URL, e.g. `anotherworld-your-team.vercel.app` or a custom domain you assign.
+
+If you still see `404: NOT_FOUND`:
+
+- Confirm the latest deployment status is **Ready** (not Error or Canceled).
+- In **Settings → General**, set Framework to **Next.js** and clear any custom Output Directory.
+- **Redeploy** (Deployments → ⋯ → Redeploy) or delete the project and re-import the repo.
+
 ## Stack
 
 - Next.js 15 · React · TypeScript · Tailwind
