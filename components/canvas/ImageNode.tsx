@@ -2,10 +2,10 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
-import type { MemoryNodeData } from "@/types";
+import type { MemoryNodeData, ImageMemory } from "@/types";
 
 type ImageFlowNode = Node<MemoryNodeData, "image">;
-import { persistImage } from "@/hooks/useMemorySync";
+import { persistImage, saveImageToCloud } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
 import { useCanvasStore } from "@/store/canvasStore";
 
@@ -21,22 +21,14 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
 
   const [caption, setCaption] = useState(image.caption);
 
-  const debouncedPersist = useDebouncedCallback((value: string) => {
-    const id = imageRef.current.id;
-    if (!isImageOnCanvas(id)) return;
-    void persistImage(
-      {
-        ...imageRef.current,
-        caption: value,
-        updatedAt: Date.now(),
-      },
-      false
-    );
+  const debouncedCloudSave = useDebouncedCallback((image: ImageMemory) => {
+    if (!isImageOnCanvas(image.id)) return;
+    void saveImageToCloud(image);
   }, 350);
 
   useEffect(() => {
-    return () => debouncedPersist.cancel();
-  }, [debouncedPersist]);
+    return () => debouncedCloudSave.cancel();
+  }, [debouncedCloudSave]);
 
   useEffect(() => {
     setCaption(image.caption);
@@ -48,26 +40,39 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
   }, [image.caption]);
 
   const flushCaption = useCallback(() => {
-    debouncedPersist.cancel();
+    debouncedCloudSave.cancel();
     const id = imageRef.current.id;
     if (!isImageOnCanvas(id)) return;
-    void persistImage(
-      {
-        ...imageRef.current,
-        caption,
-        updatedAt: Date.now(),
-      },
-      false
-    );
-  }, [caption, debouncedPersist]);
+    void saveImageToCloud({
+      ...imageRef.current,
+      caption,
+      updatedAt: Date.now(),
+    });
+  }, [caption, debouncedCloudSave]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setCaption(value);
-      debouncedPersist(value);
+      const draft: ImageMemory = {
+        ...imageRef.current,
+        caption: value,
+        updatedAt: Date.now(),
+      };
+      imageRef.current = draft;
+      useCanvasStore.getState().upsertImage(draft);
+      debouncedCloudSave(draft);
     },
-    [debouncedPersist]
+    [debouncedCloudSave]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.stopPropagation();
+      }
+    },
+    []
   );
 
   const handleResize = useCallback(
@@ -113,6 +118,7 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
           type="text"
           value={caption}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
           onBlur={flushCaption}
           placeholder="Optional trace..."
           className="nodrag nopan h-8 shrink-0 border-t border-[#D8D4CC] bg-transparent px-2 font-[family-name:var(--font-dm-mono)] text-xs text-[#5A5A5A] outline-none placeholder:text-[#949494]"

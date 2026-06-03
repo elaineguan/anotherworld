@@ -1,4 +1,9 @@
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
+import { toMillis } from "@/lib/normalize-memory";
+
+function updatedAtMs(item: { updatedAt: number }): number {
+  return toMillis(item.updatedAt);
+}
 
 function mergeByUpdatedAt<T extends { id: string; updatedAt: number }>(
   remote: T[],
@@ -12,12 +17,20 @@ function mergeByUpdatedAt<T extends { id: string; updatedAt: number }>(
 
   for (const item of local) {
     const existing = map.get(item.id);
-    if (!existing || item.updatedAt >= existing.updatedAt) {
+    if (!existing || updatedAtMs(item) >= updatedAtMs(existing)) {
       map.set(item.id, item);
     }
   }
 
-  return Array.from(map.values());
+  const merged = Array.from(map.values());
+
+  for (const item of local) {
+    if (!merged.some((m) => m.id === item.id)) {
+      merged.push(item);
+    }
+  }
+
+  return merged;
 }
 
 export function mergeNotes(
@@ -67,6 +80,6 @@ export function itemsNewerThanRemote<
   const remoteById = new Map(remote.map((item) => [item.id, item]));
   return merged.filter((item) => {
     const remoteItem = remoteById.get(item.id);
-    return !remoteItem || item.updatedAt > remoteItem.updatedAt;
+    return !remoteItem || updatedAtMs(item) > updatedAtMs(remoteItem);
   });
 }

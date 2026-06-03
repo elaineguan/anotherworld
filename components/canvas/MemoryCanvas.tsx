@@ -118,6 +118,27 @@ function CanvasInner() {
       return merged.map((next) => {
         const cur = prevById.get(next.id);
         if (!cur) return next;
+
+        const nextData = next.data as MemoryNodeData;
+        const curData = cur.data as MemoryNodeData;
+        const unchanged =
+          next.type === cur.type &&
+          next.position.x === cur.position.x &&
+          next.position.y === cur.position.y &&
+          ((next.type === "note" &&
+            nextData.note?.updatedAt === curData.note?.updatedAt) ||
+            (next.type === "image" &&
+              nextData.image?.updatedAt === curData.image?.updatedAt) ||
+            next.id === WELCOME_NODE_ID);
+
+        if (unchanged) {
+          return {
+            ...cur,
+            selected: cur.selected,
+            dragging: cur.dragging,
+          };
+        }
+
         return {
           ...next,
           selected: cur.selected,

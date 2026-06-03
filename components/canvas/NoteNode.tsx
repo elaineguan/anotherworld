@@ -2,10 +2,10 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
-import type { MemoryNodeData } from "@/types";
+import type { MemoryNodeData, NoteMemory } from "@/types";
 
 type NoteFlowNode = Node<MemoryNodeData, "note">;
-import { persistNote } from "@/hooks/useMemorySync";
+import { persistNote, saveNoteToCloud } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
 import { useCanvasStore } from "@/store/canvasStore";
 
@@ -21,22 +21,14 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
 
   const [content, setContent] = useState(note.content);
 
-  const debouncedPersist = useDebouncedCallback((value: string) => {
-    const id = noteRef.current.id;
-    if (!isNoteOnCanvas(id)) return;
-    void persistNote(
-      {
-        ...noteRef.current,
-        content: value,
-        updatedAt: Date.now(),
-      },
-      false
-    );
+  const debouncedCloudSave = useDebouncedCallback((note: NoteMemory) => {
+    if (!isNoteOnCanvas(note.id)) return;
+    void saveNoteToCloud(note);
   }, 350);
 
   useEffect(() => {
-    return () => debouncedPersist.cancel();
-  }, [debouncedPersist]);
+    return () => debouncedCloudSave.cancel();
+  }, [debouncedCloudSave]);
 
   useEffect(() => {
     setContent(note.content);
@@ -48,26 +40,39 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
   }, [note.content]);
 
   const flushContent = useCallback(() => {
-    debouncedPersist.cancel();
+    debouncedCloudSave.cancel();
     const id = noteRef.current.id;
     if (!isNoteOnCanvas(id)) return;
-    void persistNote(
-      {
-        ...noteRef.current,
-        content,
-        updatedAt: Date.now(),
-      },
-      false
-    );
-  }, [content, debouncedPersist]);
+    void saveNoteToCloud({
+      ...noteRef.current,
+      content,
+      updatedAt: Date.now(),
+    });
+  }, [content, debouncedCloudSave]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const value = e.target.value;
       setContent(value);
-      debouncedPersist(value);
+      const draft: NoteMemory = {
+        ...noteRef.current,
+        content: value,
+        updatedAt: Date.now(),
+      };
+      noteRef.current = draft;
+      useCanvasStore.getState().upsertNote(draft);
+      debouncedCloudSave(draft);
     },
-    [debouncedPersist]
+    [debouncedCloudSave]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.stopPropagation();
+      }
+    },
+    []
   );
 
   useEffect(() => {
@@ -107,6 +112,7 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
           ref={textareaRef}
           value={content}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
           onBlur={flushContent}
           placeholder="A wandering thought..."
           className="nodrag nopan h-full w-full resize-none bg-transparent font-[family-name:var(--font-eb-garamond)] text-base leading-relaxed text-[#5A5A5A] outline-none placeholder:text-[#949494]"

@@ -38,7 +38,7 @@ export function LoadingScreen() {
         loadingFadeOut ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
     >
-      <div className="-translate-y-[80px] flex flex-col items-center">
+      <div className="-translate-y-[60px] flex flex-col items-center">
         <PixelLoader />
         <p className="mt-[12px] min-h-[32px] text-center font-[family-name:var(--font-eb-garamond)] text-[32px] leading-none text-[#5A5A5A]">
           {displayText}

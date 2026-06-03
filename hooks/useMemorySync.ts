@@ -43,6 +43,9 @@ const pendingDeletedImageIds = new Set<string>();
 const tombstoneNoteIds = new Set<string>();
 const tombstoneImageIds = new Set<string>();
 
+let memorySyncSessionStarted = false;
+let syncGeneration = 0;
+
 function withoutPendingDeletes<T extends { id: string }>(
   items: T[],
   pending: Set<string>
@@ -134,16 +137,22 @@ export function useMemorySync() {
 
   useEffect(() => {
     let cancelled = false;
+    const generation = ++syncGeneration;
     initialPushDone.current = false;
     unsubsRef.current = {};
+
+    const isStale = () => cancelled || generation !== syncGeneration;
 
     const localNotes = loadLocalNotes();
     const localImages = loadLocalImages();
     const localDrawings = loadLocalDrawings();
 
-    setNotes(localNotes);
-    setImages(localImages);
-    setDrawings(localDrawings);
+    if (!memorySyncSessionStarted) {
+      memorySyncSessionStarted = true;
+      setNotes(localNotes);
+      setImages(localImages);
+      setDrawings(localDrawings);
+    }
 
     void (async () => {
       const firebaseOk = await ensureFirebaseInitialized();
@@ -205,6 +214,7 @@ export function useMemorySync() {
       };
 
       unsubsRef.current.notes = subscribeNotes((remote) => {
+        if (isStale()) return;
         remoteNotes = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().notes;
@@ -225,6 +235,7 @@ export function useMemorySync() {
       }, onSyncError);
 
       unsubsRef.current.images = subscribeImages((remote) => {
+        if (isStale()) return;
         remoteImages = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().images;
@@ -245,6 +256,7 @@ export function useMemorySync() {
       }, onSyncError);
 
       unsubsRef.current.drawings = subscribeDrawings((remote) => {
+        if (isStale()) return;
         remoteDrawings = remote;
         setSyncError(null);
         const local = useCanvasStore.getState().drawings;
@@ -319,7 +331,6 @@ export function useMemorySync() {
 
     const unsub = useCanvasStore.subscribe((state, prevState) => {
       if (
-        state.notes !== prevState.notes ||
         state.images !== prevState.images ||
         state.drawings !== prevState.drawings
       ) {
@@ -398,6 +409,24 @@ export async function saveAllMemories(): Promise<void> {
   }
 }
 
+export async function saveNoteToCloud(note: NoteMemory): Promise<void> {
+  if (tombstoneNoteIds.has(note.id)) return;
+  if (!(await ensureFirebaseInitialized())) return;
+
+  try {
+    await saveNote(note);
+    useCanvasStore.getState().setSyncError(null);
+  } catch (err) {
+    console.error("Failed to save note to cloud:", err);
+    useCanvasStore
+      .getState()
+      .setSyncError(
+        err instanceof Error ? formatSyncError(err) : "Failed to save note"
+      );
+    throw err;
+  }
+}
+
 export async function persistNote(
   note: NoteMemory,
   trackHistory = true
@@ -405,20 +434,33 @@ export async function persistNote(
   if (tombstoneNoteIds.has(note.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertNote(note);
+  await saveNoteToCloud(note);
+}
 
-  if (await ensureFirebaseInitialized()) {
-    try {
-      await saveNote(note);
-      useCanvasStore.getState().setSyncError(null);
-    } catch (err) {
-      console.error("Failed to save note to cloud:", err);
-      useCanvasStore
-        .getState()
-        .setSyncError(
-          err instanceof Error ? formatSyncError(err) : "Failed to save note"
-        );
-      throw err;
-    }
+export async function saveImageToCloud(image: ImageMemory): Promise<void> {
+  if (tombstoneImageIds.has(image.id)) return;
+  if (!(await ensureFirebaseInitialized())) return;
+
+  if (!canSyncImageToFirestore(image)) {
+    useCanvasStore
+      .getState()
+      .setSyncError(
+        "memento too large for cloud — use Add a Memento again (uploads to Storage)"
+      );
+    return;
+  }
+
+  try {
+    await saveImage(image);
+    useCanvasStore.getState().setSyncError(null);
+  } catch (err) {
+    console.error("Failed to save image to cloud:", err);
+    useCanvasStore
+      .getState()
+      .setSyncError(
+        err instanceof Error ? formatSyncError(err) : "Failed to save image"
+      );
+    throw err;
   }
 }
 
@@ -429,29 +471,7 @@ export async function persistImage(
   if (tombstoneImageIds.has(image.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertImage(image);
-
-  if (await ensureFirebaseInitialized()) {
-    if (!canSyncImageToFirestore(image)) {
-      useCanvasStore
-        .getState()
-        .setSyncError(
-          "memento too large for cloud — use Add a Memento again (uploads to Storage)"
-        );
-      return;
-    }
-    try {
-      await saveImage(image);
-      useCanvasStore.getState().setSyncError(null);
-    } catch (err) {
-      console.error("Failed to save image to cloud:", err);
-      useCanvasStore
-        .getState()
-        .setSyncError(
-          err instanceof Error ? formatSyncError(err) : "Failed to save image"
-        );
-      throw err;
-    }
-  }
+  await saveImageToCloud(image);
 }
 
 export async function persistDrawing(path: DrawingPath): Promise<void> {

@@ -8,6 +8,11 @@ import {
 } from "firebase/firestore";
 import { ensureFirebaseInitialized, getFirebaseDb } from "./firebase";
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
+import {
+  normalizeNoteMemory,
+  normalizeImageMemory,
+  normalizeDrawingPath,
+} from "@/lib/normalize-memory";
 
 const NOTES = "notes";
 const IMAGES = "images";
@@ -30,9 +35,11 @@ export function subscribeNotes(
     unsub = onSnapshot(
       collection(db, NOTES),
       (snapshot) => {
-        const notes = snapshot.docs.map(
-          (d) => ({ id: d.id, ...d.data() }) as NoteMemory
-        );
+        const notes = snapshot.docs
+          .map((d) =>
+            normalizeNoteMemory({ id: d.id, ...d.data() } as Record<string, unknown>)
+          )
+          .filter((n): n is NoteMemory => n !== null);
         onData(notes);
       },
       (err) => onError?.(err)
@@ -53,9 +60,11 @@ export function subscribeImages(
     unsub = onSnapshot(
       collection(db, IMAGES),
       (snapshot) => {
-        const images = snapshot.docs.map(
-          (d) => ({ id: d.id, ...d.data() }) as ImageMemory
-        );
+        const images = snapshot.docs
+          .map((d) =>
+            normalizeImageMemory({ id: d.id, ...d.data() } as Record<string, unknown>)
+          )
+          .filter((i): i is ImageMemory => i !== null);
         onData(images);
       },
       (err) => onError?.(err)
@@ -76,9 +85,11 @@ export function subscribeDrawings(
     unsub = onSnapshot(
       collection(db, DRAWINGS),
       (snapshot) => {
-        const paths = snapshot.docs.map(
-          (d) => ({ id: d.id, ...d.data() }) as DrawingPath
-        );
+        const paths = snapshot.docs
+          .map((d) =>
+            normalizeDrawingPath({ id: d.id, ...d.data() } as Record<string, unknown>)
+          )
+          .filter((p): p is DrawingPath => p !== null);
         onData(paths);
       },
       (err) => onError?.(err)
