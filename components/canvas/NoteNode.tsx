@@ -7,6 +7,7 @@ import { persistNote, saveNoteToCloud } from "@/hooks/useMemorySync";
 import { useDebouncedCallback } from "@/hooks/useDebounce";
 import { useCanvasStore } from "@/store/canvasStore";
 import { isNoteEditing, setNoteEditing } from "@/lib/editing-registry";
+import { isNoteDeleted } from "@/lib/deletion-registry";
 
 type NoteFlowNode = Node<MemoryNodeData, "note">;
 
@@ -34,7 +35,7 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
   const [content, setContent] = useState(() => syncedContent);
 
   const debouncedPersist = useDebouncedCallback((value: string) => {
-    if (!noteId || !isNoteOnCanvas(noteId)) return;
+    if (!noteId || isNoteDeleted(noteId) || !isNoteOnCanvas(noteId)) return;
     const base = useCanvasStore.getState().notes.find((n) => n.id === noteId);
     if (!base) return;
 
@@ -62,7 +63,7 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
   }, [noteId, syncedContent]);
 
   const flushContent = useCallback(() => {
-    if (!noteId) return;
+    if (!noteId || isNoteDeleted(noteId)) return;
     debouncedPersist.cancel();
     if (!isNoteOnCanvas(noteId)) return;
 

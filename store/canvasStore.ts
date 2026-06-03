@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import type { CanvasTool, NoteMemory, ImageMemory, DrawingPath } from "@/types";
+import {
+  isDrawingDeleted,
+  isImageDeleted,
+  isNoteDeleted,
+} from "@/lib/deletion-registry";
 
 interface CanvasState {
   tool: CanvasTool;
@@ -37,6 +42,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setDrawings: (drawings) => set({ drawings }),
   upsertNote: (note) =>
     set((state) => {
+      if (isNoteDeleted(note.id)) return state;
       const idx = state.notes.findIndex((n) => n.id === note.id);
       const notes =
         idx >= 0
@@ -46,6 +52,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     }),
   upsertImage: (image) =>
     set((state) => {
+      if (isImageDeleted(image.id)) return state;
       const idx = state.images.findIndex((i) => i.id === image.id);
       const images =
         idx >= 0
@@ -55,6 +62,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     }),
   upsertDrawing: (path) =>
     set((state) => {
+      if (isDrawingDeleted(path.id)) return state;
       const idx = state.drawings.findIndex((d) => d.id === path.id);
       const drawings =
         idx >= 0

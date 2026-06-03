@@ -38,25 +38,29 @@ import {
   applyEditingImageOverrides,
   applyEditingNoteOverrides,
 } from "@/lib/editing-registry";
-
-/** Keep deleted items from reappearing while Firestore catches up. */
-const pendingDeletedNoteIds = new Set<string>();
-const pendingDeletedImageIds = new Set<string>();
-const pendingDeletedDrawingIds = new Set<string>();
-
-/** Block late autosave (debounced typing) from resurrecting deleted items. */
-const tombstoneNoteIds = new Set<string>();
-const tombstoneImageIds = new Set<string>();
+import {
+  confirmPendingDrawingDeletesInRemote,
+  confirmPendingImageDeletesInRemote,
+  confirmPendingNoteDeletesInRemote,
+  isDrawingDeleted,
+  isImageDeleted,
+  isNoteDeleted,
+  markDrawingDeleted,
+  markImageDeleted,
+  markNoteDeleted,
+  clearNoteDeletion,
+  clearImageDeletion,
+  clearDrawingDeletion,
+  withoutDeletedDrawings,
+  withoutDeletedImages,
+  withoutDeletedNotes,
+  withoutPendingDrawingDeletes,
+  withoutPendingImageDeletes,
+  withoutPendingNoteDeletes,
+} from "@/lib/deletion-registry";
 
 let memorySyncSessionStarted = false;
 let syncGeneration = 0;
-
-function withoutPendingDeletes<T extends { id: string }>(
-  items: T[],
-  pending: Set<string>
-): T[] {
-  return items.filter((item) => !pending.has(item.id));
-}
 
 function formatSyncError(error: Error): string {
   const code = (error as { code?: string }).code ?? "";
@@ -84,10 +88,14 @@ async function persistToCloud(
 ): Promise<void> {
   if (!(await ensureFirebaseInitialized())) return;
 
+  const safeNotes = withoutDeletedNotes(notes);
+  const safeImages = withoutDeletedImages(cloudSafeImages(images));
+  const safeDrawings = withoutDeletedDrawings(drawings);
+
   await Promise.all([
-    ...notes.map((n) => saveNote(n)),
-    ...cloudSafeImages(images).map((i) => saveImage(i)),
-    ...drawings.map((d) => saveDrawing(d)),
+    ...safeNotes.map((n) => saveNote(n)),
+    ...safeImages.map((i) => saveImage(i)),
+    ...safeDrawings.map((d) => saveDrawing(d)),
   ]);
 }
 
@@ -109,15 +117,19 @@ async function pushLocalOnlyToCloud(
   ];
   const drawingUploads = itemsMissingFromRemote(drawings, remoteDrawings);
 
-  const uniqueNotes = [...new Map(noteUploads.map((n) => [n.id, n])).values()];
+  const uniqueNotes = [...new Map(noteUploads.map((n) => [n.id, n])).values()].filter(
+    (n) => !isNoteDeleted(n.id)
+  );
   const uniqueImages = [
     ...new Map(imageUploads.map((i) => [i.id, i])).values(),
-  ].filter(canSyncImageToFirestore);
+  ]
+    .filter(canSyncImageToFirestore)
+    .filter((i) => !isImageDeleted(i.id));
 
   await Promise.all([
     ...uniqueNotes.map((n) => saveNote(n)),
     ...uniqueImages.map((i) => saveImage(i)),
-    ...drawingUploads.map((d) => saveDrawing(d)),
+    ...drawingUploads.filter((d) => !isDrawingDeleted(d.id)).map((d) => saveDrawing(d)),
   ]);
 }
 
@@ -148,9 +160,9 @@ export function useMemorySync() {
 
     const isStale = () => cancelled || generation !== syncGeneration;
 
-    const localNotes = loadLocalNotes();
-    const localImages = loadLocalImages();
-    const localDrawings = loadLocalDrawings();
+    const localNotes = withoutDeletedNotes(loadLocalNotes());
+    const localImages = withoutDeletedImages(loadLocalImages());
+    const localDrawings = withoutDeletedDrawings(loadLocalDrawings());
 
     if (!memorySyncSessionStarted) {
       memorySyncSessionStarted = true;
@@ -186,15 +198,18 @@ export function useMemorySync() {
         initialPushDone.current = true;
         const mergedNotes = mergeNotes(
           remoteNotes,
-          useCanvasStore.getState().notes
+          useCanvasStore.getState().notes,
+          isNoteDeleted
         );
         const mergedImages = mergeImages(
           remoteImages,
-          useCanvasStore.getState().images
+          useCanvasStore.getState().images,
+          isImageDeleted
         );
         const mergedDrawings = mergeDrawings(
           remoteDrawings,
-          useCanvasStore.getState().drawings
+          useCanvasStore.getState().drawings,
+          isDrawingDeleted
         );
 
         void pushLocalOnlyToCloud(
@@ -222,20 +237,14 @@ export function useMemorySync() {
         if (isStale()) return;
         remoteNotes = remote;
         setSyncError(null);
-        const local = useCanvasStore.getState().notes;
-        const filteredRemote = withoutPendingDeletes(
-          remote,
-          pendingDeletedNoteIds
-        );
-        for (const id of pendingDeletedNoteIds) {
-          if (!remote.some((n) => n.id === id)) {
-            pendingDeletedNoteIds.delete(id);
-            tombstoneNoteIds.delete(id);
-          }
-        }
-        const merged = applyEditingNoteOverrides(
-          mergeNotes(filteredRemote, local),
-          local
+        const local = withoutDeletedNotes(useCanvasStore.getState().notes);
+        const filteredRemote = withoutPendingNoteDeletes(remote);
+        confirmPendingNoteDeletesInRemote(remote);
+        const merged = withoutDeletedNotes(
+          applyEditingNoteOverrides(
+            mergeNotes(filteredRemote, local, isNoteDeleted),
+            local
+          )
         );
         setNotes(merged);
         saveLocalNotes(merged);
@@ -246,20 +255,14 @@ export function useMemorySync() {
         if (isStale()) return;
         remoteImages = remote;
         setSyncError(null);
-        const local = useCanvasStore.getState().images;
-        const filteredRemote = withoutPendingDeletes(
-          remote,
-          pendingDeletedImageIds
-        );
-        for (const id of pendingDeletedImageIds) {
-          if (!remote.some((i) => i.id === id)) {
-            pendingDeletedImageIds.delete(id);
-            tombstoneImageIds.delete(id);
-          }
-        }
-        const merged = applyEditingImageOverrides(
-          mergeImages(filteredRemote, local),
-          local
+        const local = withoutDeletedImages(useCanvasStore.getState().images);
+        const filteredRemote = withoutPendingImageDeletes(remote);
+        confirmPendingImageDeletesInRemote(remote);
+        const merged = withoutDeletedImages(
+          applyEditingImageOverrides(
+            mergeImages(filteredRemote, local, isImageDeleted),
+            local
+          )
         );
         setImages(merged);
         saveLocalImages(merged);
@@ -270,17 +273,12 @@ export function useMemorySync() {
         if (isStale()) return;
         remoteDrawings = remote;
         setSyncError(null);
-        const local = useCanvasStore.getState().drawings;
-        const filteredRemote = withoutPendingDeletes(
-          remote,
-          pendingDeletedDrawingIds
+        const local = withoutDeletedDrawings(useCanvasStore.getState().drawings);
+        const filteredRemote = withoutPendingDrawingDeletes(remote);
+        confirmPendingDrawingDeletesInRemote(remote);
+        const merged = withoutDeletedDrawings(
+          mergeDrawings(filteredRemote, local, isDrawingDeleted)
         );
-        for (const id of pendingDeletedDrawingIds) {
-          if (!remote.some((d) => d.id === id)) {
-            pendingDeletedDrawingIds.delete(id);
-          }
-        }
-        const merged = mergeDrawings(filteredRemote, local);
         setDrawings(merged);
         saveLocalDrawings(merged);
         maybeInitialPush();
@@ -314,17 +312,17 @@ export function useMemorySync() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveLocalNotes(notes);
+    saveLocalNotes(withoutDeletedNotes(notes));
   }, [notes, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
-    saveLocalImages(images);
+    saveLocalImages(withoutDeletedImages(images));
   }, [images, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
-    saveLocalDrawings(drawings);
+    saveLocalDrawings(withoutDeletedDrawings(drawings));
   }, [drawings, hydrated]);
 
   useEffect(() => {
@@ -385,6 +383,10 @@ export function useMemorySync() {
 }
 
 export async function applyCanvasSnapshot(snapshot: CanvasSnapshot): Promise<void> {
+  for (const note of snapshot.notes) clearNoteDeletion(note.id);
+  for (const image of snapshot.images) clearImageDeletion(image.id);
+  for (const drawing of snapshot.drawings) clearDrawingDeletion(drawing.id);
+
   const store = useCanvasStore.getState();
   const prevNotes = store.notes;
   const prevImages = store.images;
@@ -430,7 +432,7 @@ export async function saveAllMemories(): Promise<void> {
 }
 
 export async function saveNoteToCloud(note: NoteMemory): Promise<void> {
-  if (tombstoneNoteIds.has(note.id)) return;
+  if (isNoteDeleted(note.id)) return;
   if (!(await ensureFirebaseInitialized())) return;
 
   try {
@@ -451,14 +453,14 @@ export async function persistNote(
   note: NoteMemory,
   trackHistory = true
 ): Promise<void> {
-  if (tombstoneNoteIds.has(note.id)) return;
+  if (isNoteDeleted(note.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertNote(note);
   await saveNoteToCloud(note);
 }
 
 export async function saveImageToCloud(image: ImageMemory): Promise<void> {
-  if (tombstoneImageIds.has(image.id)) return;
+  if (isImageDeleted(image.id)) return;
   if (!(await ensureFirebaseInitialized())) return;
 
   if (!canSyncImageToFirestore(image)) {
@@ -488,13 +490,14 @@ export async function persistImage(
   image: ImageMemory,
   trackHistory = true
 ): Promise<void> {
-  if (tombstoneImageIds.has(image.id)) return;
+  if (isImageDeleted(image.id)) return;
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertImage(image);
   await saveImageToCloud(image);
 }
 
 export async function persistDrawing(path: DrawingPath): Promise<void> {
+  if (isDrawingDeleted(path.id)) return;
   recordHistory();
   useCanvasStore.getState().upsertDrawing(path);
 
@@ -514,10 +517,9 @@ export async function persistDrawing(path: DrawingPath): Promise<void> {
 }
 
 export async function removeNoteMemory(id: string): Promise<void> {
-  if (tombstoneNoteIds.has(id)) return;
+  if (isNoteDeleted(id)) return;
   recordHistory();
-  tombstoneNoteIds.add(id);
-  pendingDeletedNoteIds.add(id);
+  markNoteDeleted(id);
   const store = useCanvasStore.getState();
   store.removeNote(id);
   saveLocalNotes(store.notes);
@@ -539,10 +541,9 @@ export async function removeNoteMemory(id: string): Promise<void> {
 }
 
 export async function removeImageMemory(id: string): Promise<void> {
-  if (tombstoneImageIds.has(id)) return;
+  if (isImageDeleted(id)) return;
   recordHistory();
-  tombstoneImageIds.add(id);
-  pendingDeletedImageIds.add(id);
+  markImageDeleted(id);
   const store = useCanvasStore.getState();
   store.removeImage(id);
   saveLocalImages(store.images);
@@ -564,9 +565,9 @@ export async function removeImageMemory(id: string): Promise<void> {
 }
 
 export async function removeDrawingMemory(id: string): Promise<void> {
-  if (pendingDeletedDrawingIds.has(id)) return;
+  if (isDrawingDeleted(id)) return;
   recordHistory();
-  pendingDeletedDrawingIds.add(id);
+  markDrawingDeleted(id);
   const store = useCanvasStore.getState();
   store.removeDrawing(id);
   saveLocalDrawings(store.drawings);
