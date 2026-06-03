@@ -29,6 +29,7 @@ import {
   removeImageMemory,
 } from "@/hooks/useMemorySync";
 import type { MemoryNodeData } from "@/types";
+import { isEditingCanvasField } from "@/lib/is-editing-canvas-field";
 
 const WELCOME_NODE_ID = "welcome-message";
 const WELCOME_WIDTH = 448;
@@ -149,6 +150,7 @@ function CanvasInner() {
   }, [merged, setNodes]);
 
   const handleNodesDelete = useCallback((deleted: Node[]) => {
+    if (isEditingCanvasField()) return;
     for (const node of deleted) {
       if (node.id === WELCOME_NODE_ID) continue;
       if (node.type === "note") void removeNoteMemory(node.id);
@@ -156,12 +158,16 @@ function CanvasInner() {
     }
   }, []);
 
+  const onBeforeDelete = useCallback(async () => !isEditingCanvasField(), []);
+
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setNodes((nds) => {
-        const filtered = changes.filter(
-          (c) => !("id" in c) || c.id !== WELCOME_NODE_ID
-        );
+        const filtered = changes.filter((c) => {
+          if ("id" in c && c.id === WELCOME_NODE_ID) return false;
+          if (c.type === "remove" && isEditingCanvasField()) return false;
+          return true;
+        });
         if (filtered.length === 0) return nds;
 
         const updated = applyNodeChanges(filtered, nds) as Node<MemoryNodeData>[];
@@ -219,6 +225,7 @@ function CanvasInner() {
         className={`memory-flow ${isDrawMode ? "memory-flow--draw" : ""}`}
         nodes={nodes}
         onNodesChange={onNodesChange}
+        onBeforeDelete={onBeforeDelete}
         onNodesDelete={handleNodesDelete}
         nodeTypes={nodeTypes}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}

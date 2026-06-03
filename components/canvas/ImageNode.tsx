@@ -66,7 +66,7 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
     [debouncedCloudSave]
   );
 
-  const handleKeyDown = useCallback(
+  const stopDeleteShortcut = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Backspace" || e.key === "Delete") {
         e.stopPropagation();
@@ -118,7 +118,8 @@ function ImageNodeComponent({ data, selected }: NodeProps<ImageFlowNode>) {
           type="text"
           value={caption}
           onChange={handleChange}
-          onKeyDown={handleKeyDown}
+          onKeyDown={stopDeleteShortcut}
+          onKeyDownCapture={stopDeleteShortcut}
           onBlur={flushCaption}
           placeholder="Optional trace..."
           className="nodrag nopan h-8 shrink-0 border-t border-[#D8D4CC] bg-transparent px-2 font-[family-name:var(--font-dm-mono)] text-xs text-[#5A5A5A] outline-none placeholder:text-[#949494]"

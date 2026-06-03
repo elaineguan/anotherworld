@@ -66,7 +66,7 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
     [debouncedCloudSave]
   );
 
-  const handleKeyDown = useCallback(
+  const stopDeleteShortcut = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Backspace" || e.key === "Delete") {
         e.stopPropagation();
@@ -112,7 +112,8 @@ function NoteNodeComponent({ data, selected }: NodeProps<NoteFlowNode>) {
           ref={textareaRef}
           value={content}
           onChange={handleChange}
-          onKeyDown={handleKeyDown}
+          onKeyDown={stopDeleteShortcut}
+          onKeyDownCapture={stopDeleteShortcut}
           onBlur={flushContent}
           placeholder="A wandering thought..."
           className="nodrag nopan h-full w-full resize-none bg-transparent font-[family-name:var(--font-eb-garamond)] text-base leading-relaxed text-[#5A5A5A] outline-none placeholder:text-[#949494]"
