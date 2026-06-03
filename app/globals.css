@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  --color-archive-bg: #f8f6f2;
+  --color-archive-text: #5a5a5a;
+  --color-archive-muted: #949494;
+  --color-archive-border: #d8d4cc;
+  --font-serif: "EB Garamond", "Garamond Premier Pro", Garamond, serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  background-color: var(--color-archive-bg);
+  color: var(--color-archive-text);
+  font-family: var(--font-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+body > div {
+  min-height: 100dvh;
+}
+
+.fade-screen {
+  animation: screen-fade 1.2s ease forwards;
+}
+
+@keyframes screen-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.fade-in {
+  animation: fade-in 1s ease forwards;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.typewriter-fade-out {
+  animation: typewriter-fade 0.8s ease forwards;
+}
+
+@keyframes typewriter-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.pixel-loader-cell {
+  animation: pixel-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pixel-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.memory-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.memory-flow .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.memory-flow.memory-flow--draw .react-flow__pane {
+  cursor: crosshair;
+}
+
+.font-garamond-narrow {
+  font-family:
+    "Garamond Premier Pro",
+    "ITC Garamond Narrow",
+    var(--font-eb-garamond),
+    "EB Garamond",
+    Garamond,
+    serif;
+  font-stretch: condensed;
+  letter-spacing: -0.02em;
+}
+
+.memory-flow .react-flow__node {
+  cursor: grab;
+}
+
+.memory-flow .react-flow__node.dragging {
+  cursor: grabbing;
+}
