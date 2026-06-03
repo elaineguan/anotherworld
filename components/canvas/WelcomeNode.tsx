@@ -9,7 +9,7 @@ export function WelcomeNode() {
         </h2>
         <p className="mt-4 font-[family-name:var(--font-manrope)] text-base leading-relaxed text-[#5A5A5A]">
           This canvas holds the memories, observations, and traces left behind by
-          travelers in a strange world. Add what you&apos;ve seen, what you&apos;ve
+          our collective consciousness. Add what you&apos;ve seen, what you&apos;ve
           learned, or what you don&apos;t want forgotten.
         </p>
         {/* eslint-disable-next-line @next/next/no-img-element */}

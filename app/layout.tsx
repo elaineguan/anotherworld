@@ -24,7 +24,7 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "Isekai x Experiment",
   description:
-    "A shared memory archive — collective consciousness of travelers in another world.",
+    "A shared memory archive and collective consciousness of our isekai x experiment class.",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

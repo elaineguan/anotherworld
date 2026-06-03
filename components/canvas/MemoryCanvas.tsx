@@ -20,6 +20,7 @@ import { WelcomeNode } from "./WelcomeNode";
 import { DrawingLayer } from "./DrawingLayer";
 import { Toolbar } from "./Toolbar";
 import { SaveToast } from "./SaveToast";
+import { SyncIndicator } from "./SyncIndicator";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useMemorySync, persistNote, persistImage } from "@/hooks/useMemorySync";
 import type { MemoryNodeData } from "@/types";
@@ -195,8 +196,9 @@ function CanvasInner() {
           lineWidth={1}
         />
         <DrawingLayer />
-        <Panel position="top-left" className="!m-0 !p-0">
+        <Panel position="top-left" className="canvas-panel !m-0 !p-0">
           <Toolbar />
+          <SyncIndicator />
         </Panel>
       </ReactFlow>
     </div>

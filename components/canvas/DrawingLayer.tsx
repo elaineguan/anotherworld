@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { v4 as uuidv4 } from "uuid";
 import { useCanvasStore } from "@/store/canvasStore";
@@ -43,11 +43,15 @@ export function DrawingLayer() {
   const { screenToFlowPosition } = useReactFlow();
   const viewport = useViewport();
   const svgRef = useRef<SVGSVGElement>(null);
-  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const drawingRef = useRef(false);
+  const pointsRef = useRef<Point[]>([]);
+  const captureTargetRef = useRef<Element | null>(null);
+  const captureIdRef = useRef<number | null>(null);
+  const previewPathRef = useRef<SVGPathElement | null>(null);
 
   const isDrawing = tool === "draw";
   const isErasing = tool === "erase";
+  const isDrawMode = isDrawing || isErasing;
 
   const getFlowPoint = useCallback(
     (clientX: number, clientY: number): Point =>
@@ -55,28 +59,59 @@ export function DrawingLayer() {
     [screenToFlowPosition]
   );
 
-  const finishStroke = useCallback(async () => {
-    if (currentPoints.length < 2) {
-      setCurrentPoints([]);
-      return;
+  const updatePreview = useCallback(() => {
+    const el = previewPathRef.current;
+    if (!el) return;
+    const pts = pointsRef.current;
+    if (pts.length > 1) {
+      el.setAttribute("d", pathToSvg(pts));
+      el.style.display = "";
+    } else {
+      el.style.display = "none";
     }
+  }, []);
+
+  const releaseCapture = useCallback(() => {
+    if (
+      captureTargetRef.current &&
+      captureIdRef.current !== null &&
+      captureTargetRef.current.hasPointerCapture(captureIdRef.current)
+    ) {
+      captureTargetRef.current.releasePointerCapture(captureIdRef.current);
+    }
+    captureTargetRef.current = null;
+    captureIdRef.current = null;
+  }, []);
+
+  const finishStroke = useCallback(async () => {
+    const points = pointsRef.current;
+    pointsRef.current = [];
+    updatePreview();
+
+    if (points.length < 2) return;
+
     const path: DrawingPath = {
       id: uuidv4(),
-      points: currentPoints,
+      points,
       color: STROKE_COLOR,
       strokeWidth: STROKE_WIDTH,
       createdAt: Date.now(),
     };
-    setCurrentPoints([]);
     await persistDrawing(path);
-  }, [currentPoints]);
+  }, [updatePreview]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (!isDrawing && !isErasing) return;
+      if (!isDrawMode) return;
+      if (e.button !== 0) return;
+
       e.preventDefault();
       e.stopPropagation();
-      (e.target as Element).setPointerCapture(e.pointerId);
+
+      const target = e.currentTarget as Element;
+      target.setPointerCapture(e.pointerId);
+      captureTargetRef.current = target;
+      captureIdRef.current = e.pointerId;
 
       const point = getFlowPoint(e.clientX, e.clientY);
 
@@ -87,77 +122,72 @@ export function DrawingLayer() {
       }
 
       drawingRef.current = true;
-      setCurrentPoints([point]);
+      pointsRef.current = [point];
+      updatePreview();
     },
-    [isDrawing, isErasing, getFlowPoint, drawings]
+    [isDrawMode, isErasing, getFlowPoint, drawings, updatePreview]
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (!drawingRef.current || !isDrawing) {
-        if (isErasing && e.buttons === 1) {
-          const point = getFlowPoint(e.clientX, e.clientY);
-          const hit = drawings.find((d) =>
-            pointNearPath(point, d, ERASE_RADIUS)
-          );
-          if (hit) void removeDrawingMemory(hit.id);
-        }
+      if (isErasing && e.buttons === 1) {
+        const point = getFlowPoint(e.clientX, e.clientY);
+        const hit = drawings.find((d) =>
+          pointNearPath(point, d, ERASE_RADIUS)
+        );
+        if (hit) void removeDrawingMemory(hit.id);
         return;
       }
+
+      if (!drawingRef.current || !isDrawing) return;
+
       const point = getFlowPoint(e.clientX, e.clientY);
-      setCurrentPoints((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && dist(last, point) < 2) return prev;
-        return [...prev, point];
-      });
+      const prev = pointsRef.current;
+      const last = prev[prev.length - 1];
+      if (last && dist(last, point) < 2) return;
+
+      pointsRef.current = [...prev, point];
+      updatePreview();
     },
-    [isDrawing, isErasing, getFlowPoint, drawings]
+    [isDrawing, isErasing, getFlowPoint, drawings, updatePreview]
   );
 
-  const handlePointerUp = useCallback(() => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    void finishStroke();
-  }, [finishStroke]);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      releaseCapture();
+      if (!drawingRef.current) return;
+      drawingRef.current = false;
+      void finishStroke();
+    },
+    [finishStroke, releaseCapture]
+  );
 
-  if (tool !== "draw" && tool !== "erase") {
-    return (
-      <svg
-        ref={svgRef}
-        className="pointer-events-none absolute inset-0 h-full w-full"
-        style={{
-          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
-          transformOrigin: "0 0",
-        }}
-      >
-        {drawings.map((path) => (
-          <path
-            key={path.id}
-            d={pathToSvg(path.points)}
-            fill="none"
-            stroke={path.color}
-            strokeWidth={path.strokeWidth / viewport.zoom}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ))}
-      </svg>
-    );
-  }
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent) => {
+      releaseCapture();
+      drawingRef.current = false;
+      pointsRef.current = [];
+      updatePreview();
+    },
+    [releaseCapture, updatePreview]
+  );
 
   return (
     <svg
       ref={svgRef}
-      className="absolute inset-0 z-10 h-full w-full touch-none"
+      className={`absolute inset-0 h-full w-full touch-none ${
+        isDrawMode ? "z-[5] cursor-crosshair" : "pointer-events-none z-[1]"
+      }`}
       style={{
         transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
         transformOrigin: "0 0",
-        cursor: isErasing ? "cell" : "crosshair",
+        cursor: isErasing ? "cell" : isDrawing ? "crosshair" : undefined,
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       {drawings.map((path) => (
         <path
@@ -170,16 +200,15 @@ export function DrawingLayer() {
           strokeLinejoin="round"
         />
       ))}
-      {currentPoints.length > 1 && (
-        <path
-          d={pathToSvg(currentPoints)}
-          fill="none"
-          stroke={STROKE_COLOR}
-          strokeWidth={STROKE_WIDTH / viewport.zoom}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      )}
+      <path
+        ref={previewPathRef}
+        fill="none"
+        stroke={STROKE_COLOR}
+        strokeWidth={STROKE_WIDTH / viewport.zoom}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ display: "none" }}
+      />
     </svg>
   );
 }

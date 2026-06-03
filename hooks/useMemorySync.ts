@@ -27,13 +27,18 @@ import { recordHistory } from "@/store/historyStore";
 import type { NoteMemory, ImageMemory, DrawingPath } from "@/types";
 import type { CanvasSnapshot } from "@/store/historyStore";
 
-function preferLocalWhenRemoteEmpty<T>(
-  remote: T[],
-  loadLocal: () => T[]
-): T[] {
-  if (remote.length > 0) return remote;
-  const local = loadLocal();
-  return local.length > 0 ? local : remote;
+async function persistToCloud(
+  notes: NoteMemory[],
+  images: ImageMemory[],
+  drawings: DrawingPath[]
+): Promise<void> {
+  if (!isFirebaseConfigured()) return;
+
+  await Promise.all([
+    ...notes.map((n) => saveNote(n)),
+    ...images.map((i) => saveImage(i)),
+    ...drawings.map((d) => saveDrawing(d)),
+  ]);
 }
 
 export function useMemorySync() {
@@ -54,9 +59,6 @@ export function useMemorySync() {
     setNotes(localNotes);
     setImages(localImages);
     setDrawings(localDrawings);
-    saveLocalNotes(localNotes);
-    saveLocalImages(localImages);
-    saveLocalDrawings(localDrawings);
 
     if (isFirebaseConfigured()) {
       const onSyncError = (error: Error) => {
@@ -64,21 +66,18 @@ export function useMemorySync() {
       };
 
       const unsubNotes = subscribeNotes((remote) => {
-        const merged = preferLocalWhenRemoteEmpty(remote, loadLocalNotes);
-        setNotes(merged);
-        saveLocalNotes(merged);
+        setNotes(remote);
+        saveLocalNotes(remote);
       }, onSyncError);
 
       const unsubImages = subscribeImages((remote) => {
-        const merged = preferLocalWhenRemoteEmpty(remote, loadLocalImages);
-        setImages(merged);
-        saveLocalImages(merged);
+        setImages(remote);
+        saveLocalImages(remote);
       }, onSyncError);
 
       const unsubDrawings = subscribeDrawings((remote) => {
-        const merged = preferLocalWhenRemoteEmpty(remote, loadLocalDrawings);
-        setDrawings(merged);
-        saveLocalDrawings(merged);
+        setDrawings(remote);
+        saveLocalDrawings(remote);
       }, onSyncError);
 
       if (unsubNotes || unsubImages || unsubDrawings) {
@@ -112,14 +111,20 @@ export function useMemorySync() {
   }, [drawings, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
+
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const scheduleSave = () => {
+    const scheduleCloudSave = () => {
+      if (!isFirebaseConfigured()) return;
       if (timer !== undefined) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = undefined;
-        void saveAllMemories();
-      }, 1200);
+        const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
+        void persistToCloud(n, i, d).catch((err) =>
+          console.error("Cloud save failed:", err)
+        );
+      }, 800);
     };
 
     const unsub = useCanvasStore.subscribe((state, prevState) => {
@@ -128,11 +133,17 @@ export function useMemorySync() {
         state.images !== prevState.images ||
         state.drawings !== prevState.drawings
       ) {
-        scheduleSave();
+        scheduleCloudSave();
       }
     });
 
-    const interval = setInterval(() => void saveAllMemories(), 15000);
+    const interval = setInterval(() => {
+      if (!isFirebaseConfigured()) return;
+      const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
+      void persistToCloud(n, i, d).catch((err) =>
+        console.error("Cloud save failed:", err)
+      );
+    }, 10000);
 
     const onBeforeUnload = () => {
       const { notes: n, images: i, drawings: d } = useCanvasStore.getState();
@@ -149,7 +160,7 @@ export function useMemorySync() {
       clearInterval(interval);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, []);
+  }, [hydrated]);
 }
 
 export async function applyCanvasSnapshot(snapshot: CanvasSnapshot): Promise<void> {
@@ -162,12 +173,11 @@ export async function applyCanvasSnapshot(snapshot: CanvasSnapshot): Promise<voi
   store.setImages(snapshot.images);
   store.setDrawings(snapshot.drawings);
 
-  if (!isFirebaseConfigured()) {
-    saveLocalNotes(snapshot.notes);
-    saveLocalImages(snapshot.images);
-    saveLocalDrawings(snapshot.drawings);
-    return;
-  }
+  saveLocalNotes(snapshot.notes);
+  saveLocalImages(snapshot.images);
+  saveLocalDrawings(snapshot.drawings);
+
+  if (!isFirebaseConfigured()) return;
 
   await Promise.all([
     ...prevNotes
@@ -192,13 +202,7 @@ export async function saveAllMemories(): Promise<void> {
   saveLocalImages(images);
   saveLocalDrawings(drawings);
 
-  if (isFirebaseConfigured()) {
-    await Promise.all([
-      ...notes.map((n) => saveNote(n)),
-      ...images.map((i) => saveImage(i)),
-      ...drawings.map((d) => saveDrawing(d)),
-    ]);
-  }
+  await persistToCloud(notes, images, drawings);
 }
 
 export async function persistNote(
@@ -207,6 +211,14 @@ export async function persistNote(
 ): Promise<void> {
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertNote(note);
+
+  if (isFirebaseConfigured()) {
+    try {
+      await saveNote(note);
+    } catch (err) {
+      console.error("Failed to save note to cloud:", err);
+    }
+  }
 }
 
 export async function persistImage(
@@ -215,21 +227,39 @@ export async function persistImage(
 ): Promise<void> {
   if (trackHistory) recordHistory();
   useCanvasStore.getState().upsertImage(image);
+
+  if (isFirebaseConfigured()) {
+    try {
+      await saveImage(image);
+    } catch (err) {
+      console.error("Failed to save image to cloud:", err);
+    }
+  }
 }
 
 export async function persistDrawing(path: DrawingPath): Promise<void> {
   recordHistory();
   useCanvasStore.getState().upsertDrawing(path);
+
   if (isFirebaseConfigured()) {
-    await saveDrawing(path);
+    try {
+      await saveDrawing(path);
+    } catch (err) {
+      console.error("Failed to save drawing to cloud:", err);
+    }
   }
 }
 
 export async function removeDrawingMemory(id: string): Promise<void> {
   recordHistory();
   useCanvasStore.getState().removeDrawing(id);
+
   if (isFirebaseConfigured()) {
-    await deleteDrawing(id);
+    try {
+      await deleteDrawing(id);
+    } catch (err) {
+      console.error("Failed to delete drawing from cloud:", err);
+    }
   }
 }
 

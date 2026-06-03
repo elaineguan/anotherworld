@@ -11,17 +11,26 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Firebase (shared world)
+## Firebase (shared world — required for multi-user)
 
-Copy `.env.example` to `.env.local` and add your Firebase project credentials. Without Firebase, memories persist in the browser via `localStorage` for local exploration.
+Without Firebase, notes only save in **this browser** (`localStorage`). Other people will not see them.
+
+1. Create a Firebase project and enable **Firestore** and **Storage**.
+2. Copy `.env.example` to `.env.local` and fill in all `NEXT_PUBLIC_FIREBASE_*` values.
+3. Deploy security rules from this repo:
+   - `firestore.rules` → Firestore → Rules → Publish
+   - `storage.rules` → Storage → Rules → Publish
+4. On **Vercel**, add the same env vars under Project → Settings → Environment Variables, then redeploy.
+
+The canvas footer shows **shared canvas · live sync** when Firebase is connected. If it says **this device only**, sharing is not enabled.
 
 Firestore collections:
 
 - `notes` — text fragments
-- `images` — memento metadata (files in Storage)
+- `images` — memento metadata (image files in Storage)
 - `drawings` — vector traces
 
-Enable Firestore and Storage in the Firebase console. Use open security rules only for private experiments; lock down rules for production.
+Use open rules only for trusted collaborators; tighten rules before a public launch.
 
 ## Structure
 

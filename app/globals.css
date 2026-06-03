@@ -108,3 +108,13 @@ body > div {
 .memory-flow .react-flow__node.dragging {
   cursor: grabbing;
 }
+
+.memory-flow .react-flow__panel.canvas-panel {
+  z-index: 50 !important;
+  pointer-events: none;
+}
+
+.memory-flow .react-flow__panel.canvas-panel .canvas-toolbar,
+.memory-flow .react-flow__panel.canvas-panel p {
+  pointer-events: auto;
+}

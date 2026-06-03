@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useUiStore } from "@/store/uiStore";
@@ -17,6 +17,7 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import type { CanvasTool } from "@/types";
 
 const TOOLS: { id: CanvasTool; label: string }[] = [
+  { id: "select", label: "Wander" },
   { id: "note", label: "Leave a Thought" },
   { id: "image", label: "Add a Memento" },
   { id: "draw", label: "Trace" },
@@ -24,6 +25,7 @@ const TOOLS: { id: CanvasTool; label: string }[] = [
 
 function isToolActive(tool: CanvasTool, id: CanvasTool): boolean {
   if (id === "draw") return tool === "draw" || tool === "erase";
+  if (id === "select") return tool === "select";
   return tool === id;
 }
 
@@ -40,6 +42,23 @@ export function Toolbar() {
   const { screenToFlowPosition } = useReactFlow();
   const { undo, redo, canUndo, canRedo } = useUndoRedo();
   const showSaveToast = useUiStore((s) => s.showSaveToast);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+      setTool("select");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setTool]);
 
   const handleSave = async () => {
     await saveAllMemories();
@@ -76,9 +95,13 @@ export function Toolbar() {
 
     if (isFirebaseConfigured()) {
       url = await uploadMemoryImage(file);
-    }
-
-    if (!url) {
+      if (!url) {
+        console.error(
+          "Image upload failed. Check Firebase Storage rules and bucket config."
+        );
+        return;
+      }
+    } else {
       url = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
@@ -109,18 +132,34 @@ export function Toolbar() {
     img.src = url;
   };
 
+  const handleToolClick = (id: CanvasTool) => {
+    if (id === "note") {
+      void handleNote();
+      return;
+    }
+    if (id === "image") {
+      handleImageClick();
+      return;
+    }
+    if (id === "draw") {
+      if (tool === "draw" || tool === "erase") {
+        setTool("select");
+      } else {
+        setTool("draw");
+      }
+      return;
+    }
+    setTool("select");
+  };
+
   return (
-    <div className="pointer-events-auto z-20 m-5 flex gap-3">
+    <div className="canvas-toolbar pointer-events-auto z-50 m-5 flex gap-3">
       <div className="flex flex-col gap-0.5 rounded-sm border border-[#D8D4CC] bg-[#F8F6F2]/95 px-1 py-1.5 font-[family-name:var(--font-dm-mono)] text-[18px] backdrop-blur-sm">
         {TOOLS.map(({ id, label }) => (
           <button
             key={id}
             type="button"
-            onClick={() => {
-              if (id === "note") void handleNote();
-              else if (id === "image") handleImageClick();
-              else setTool(id === "draw" ? "draw" : "select");
-            }}
+            onClick={() => handleToolClick(id)}
             className={`rounded-sm px-3 py-1 text-left transition-colors duration-200 ${toolButtonClass(isToolActive(tool, id))}`}
           >
             {label}
@@ -141,13 +180,6 @@ export function Toolbar() {
               className={`rounded-sm px-3 py-0.5 text-left transition-colors duration-200 ${toolButtonClass(tool === "erase")}`}
             >
               erase
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool("select")}
-              className="rounded-sm px-3 py-0.5 text-left text-[#5A5A5A] transition-colors duration-200 hover:bg-[#EDE9E1] hover:text-[#1A1A1A]"
-            >
-              wander
             </button>
           </div>
         )}
