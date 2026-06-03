@@ -1,18 +1,30 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { getFirebaseEnvStatus } from "@/lib/firebase-config";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { useCanvasStore } from "@/store/canvasStore";
 
 export function SyncIndicator() {
   const firebaseReady = useCanvasStore((s) => s.firebaseReady);
   const syncError = useCanvasStore((s) => s.syncError);
-  const configured = isFirebaseConfigured();
+  const [envStatus, setEnvStatus] = useState(() => getFirebaseEnvStatus());
+
+  useEffect(() => {
+    setEnvStatus(getFirebaseEnvStatus());
+  }, []);
+
+  const configured = envStatus.configured && isFirebaseConfigured();
 
   let message: string;
   let className = "text-[#949494]";
 
-  if (!configured) {
-    message = "this device only · add Firebase env vars to share";
+  if (!envStatus.configured) {
+    const hint =
+      envStatus.missing.length > 0
+        ? ` (missing ${envStatus.missing.join(", ")})`
+        : "";
+    message = `this device only · restart dev server after .env.local${hint}`;
   } else if (syncError) {
     message = `sync error · ${syncError}`;
     className = "text-[#8B4513]";
